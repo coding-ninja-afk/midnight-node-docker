@@ -1,0 +1,12 @@
+# Credentials and keys: never commit
+secrets/
+*.password
+*.privatekey
+.envrc.local
+.env
+
+# Local scratch
+*.log
+
+# Assessment brief: hiring-team material, not part of the submission
+DevOps Take Home Test V2.pdf

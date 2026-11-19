@@ -1,0 +1,103 @@
+# Cardano side of the Midnight PreProd stack: cardano-node -> postgres -> cardano-db-sync.
+#
+# Version pins follow the Midnight db-sync guide (docs.midnight.network/nodes/cardano-db-sync):
+#   "Use Cardano-db-sync 13.7.1.0 together with Cardano-node 11.0.1", PostgreSQL 17.
+#
+# The project name and volume keys must stay as they are: they map to the existing
+# midnight-preprod_* Docker volumes that hold the chain data and db-sync progress.
+# Renaming either one makes Compose create empty volumes and start syncing from zero.
+#
+# Credentials come from ./secrets/* (git-ignored, created by scripts/init-secrets.sh).
+# No service publishes a host port: everything talks over the private project network.
+
+name: midnight-preprod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+secrets:
+  postgres_db:
+    file: ./secrets/postgres_db
+  postgres_user:
+    file: ./secrets/postgres_user
+  postgres_password:
+    file: ./secrets/postgres_password
+
+services:
+  cardano-node:
+    image: ghcr.io/intersectmbo/cardano-node:11.0.1
+    restart: unless-stopped
+    environment:
+      NETWORK: preprod
+      CARDANO_NODE_SOCKET_PATH: /ipc/node.socket
+    volumes:
+      - cardano-node-data:/data
+      - cardano-ipc:/ipc
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /ipc/node.socket"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10m
+    stop_grace_period: 120s
+    logging: *logging
+
+  postgres:
+    image: postgres:17.12-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB_FILE: /run/secrets/postgres_db
+      POSTGRES_USER_FILE: /run/secrets/postgres_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_db, postgres_user, postgres_password]
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=8GB
+      - -c
+      - maintenance_work_mem=1GB
+      - -c
+      - max_parallel_maintenance_workers=4
+      - -c
+      - max_wal_size=4GB
+    shm_size: 1g
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$(cat /run/secrets/postgres_user)\" -d \"$$(cat /run/secrets/postgres_db)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 120s
+    logging: *logging
+
+  cardano-db-sync:
+    image: ghcr.io/intersectmbo/cardano-db-sync:13.7.1.0
+    restart: unless-stopped
+    environment:
+      NETWORK: preprod
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    # The image reads /run/secrets/postgres_{db,user,password} itself.
+    secrets: [postgres_db, postgres_user, postgres_password]
+    volumes:
+      - cardano-ipc:/node-ipc
+      - db-sync-state:/var/lib/cexplorer
+    depends_on:
+      cardano-node:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 60s
+    logging: *logging
+
+volumes:
+  cardano-node-data:
+  cardano-ipc:
+  postgres-data:
+  db-sync-state:

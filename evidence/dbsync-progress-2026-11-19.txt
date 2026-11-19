@@ -1,0 +1,32 @@
+## sample 1 2026-11-19T10:48:21Z
+== cardano-node tip
+    "block": 2743355,
+    "epoch": 170,
+    "slot": 72106107,
+    "syncProgress": "52.29"
+== db-sync latest block (block_no | slot_no | epoch | time UTC | lag)
+2653370 | 69693114 | 165 | 2024-09-03 15:11:54 | 806 days 19:36:27.795059
+== db-sync sync_percent
+50.577
+
+## sample 2 2026-11-19T10:50:24Z
+== cardano-node tip
+    "block": 2761379,
+    "epoch": 171,
+    "slot": 72588561,
+    "syncProgress": "52.63"
+== db-sync latest block (block_no | slot_no | epoch | time UTC | lag)
+2684763 | 70530032 | 167 | 2024-09-13 07:40:32 | 797 days 03:09:53.094467
+== db-sync sync_percent
+51.170
+
+## sample 3 (scripts/dbsync-status.sh after review; db-sync now paced by cardano-node)
+2026-11-19T11:05:20Z  node: block=2877711 syncProgress=54.82  db-sync: block=2877743 slot=75672447 epoch=178 block_time=2024-11-11T20:07:27Z lag=63730673s gap=-32
+
+FAIL  1 node syncProgress = 100.00  (54.82)
+PASS  2 block gap <= 5  (-32)
+FAIL  3 newest block age < 300s  (63730673s)
+SKIP  4 still advancing  (run with --advance 300)
+PASS  5 no db-sync errors in last 15m  (0 error lines)
+
+RESULT: not caught up
