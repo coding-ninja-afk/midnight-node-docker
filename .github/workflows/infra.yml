@@ -4,12 +4,13 @@
 #                   (made on a hosted runner's empty Docker daemon: a review aid, never applied).
 #   push to main -> the same, then:
 #     live (vars.TF_LIVE_TARGET == 'true'): `plan-live` plans on the self-hosted target runner
-#       against the remote state AND the live Docker daemon, and records that daemon's ID; `apply`
-#       (gated by the "preprod" Environment) runs on the same runner label, checks it is talking to
-#       the SAME daemon (infra/scripts/assert-same-daemon.sh) and applies exactly that plan.
+#       against the remote state AND the live Docker daemon, and records the target (daemon ID,
+#       endpoint, infra/ workdir, every bind-mount host path); `apply` (gated by the "preprod"
+#       Environment) runs on the same runner label, re-checks all of it
+#       (infra/scripts/assert-same-target.sh) and applies exactly that plan.
 #     otherwise: `apply` is a dry run that prints the hosted plan.
-# Credentials: OIDC only (no long-lived keys). The Docker endpoint comes from vars.TF_DOCKER_HOST
-# (default: the runner's local socket) and is the same for plan and apply.
+# Credentials: OIDC only (no long-lived keys). The live Docker endpoint (vars.TF_DOCKER_HOST, default
+# the runner's local socket) is set ONLY on the live jobs/steps; hosted jobs never see it.
 name: infra
 
 on:
@@ -33,8 +34,6 @@ env:
   CHECKOV_VERSION: "3.4.5"
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
-  # One Docker endpoint for every terraform run in this workflow (plan-live and apply must match).
-  TF_VAR_docker_host: ${{ vars.TF_DOCKER_HOST || 'unix:///var/run/docker.sock' }}
 
 defaults:
   run:
@@ -216,8 +215,10 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.TF_LIVE_TARGET == 'true'
     needs: [static, test, scripts, smoke]
     # The runner that can reach the live Docker daemon. apply uses the same labels, and
-    # assert-same-daemon.sh proves it reached the same daemon.
+    # assert-same-target.sh proves it reached the same daemon, workdir and host paths.
     runs-on: [self-hosted, midnight-preprod]
+    env:
+      TF_VAR_docker_host: ${{ vars.TF_DOCKER_HOST || 'unix:///var/run/docker.sock' }}
     concurrency:
       group: infra-live-preprod
       cancel-in-progress: false
@@ -241,22 +242,23 @@ jobs:
       - name: plan against the live daemon and remote state
         run: |
           terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
-          scripts/assert-same-daemon.sh record plan-daemon.txt
           terraform plan -var-file=envs/preprod.tfvars -out=tfplan -no-color | tee plan.log
           terraform show -no-color tfplan > plan.txt
+          # Record the target this plan is bound to: daemon, endpoint, workdir, bind-mount paths.
+          scripts/assert-same-target.sh record plan-target.txt tfplan
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: plan-live-preprod
           path: |
             infra/tfplan
             infra/plan.txt
-            infra/plan-daemon.txt
+            infra/plan-target.txt
           retention-days: 7
       - name: job summary
         run: |
           {
             echo "### terraform plan: preprod (LIVE target, for approval)"
-            echo '```'; cat plan-daemon.txt; grep -E '^Plan:|^No changes' plan.log || true; echo '```'
+            echo '```'; grep -vE '^host_path=' plan-target.txt; echo "bind-mount paths: $(grep -c '^host_path=' plan-target.txt)"; grep -E '^Plan:|^No changes' plan.log || true; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply:
@@ -293,12 +295,15 @@ jobs:
         with:
           name: plan-live-preprod
           path: infra
-      - name: apply on the same daemon the plan was made against
+      - name: apply on the same target the plan was made for
         if: vars.TF_LIVE_TARGET == 'true'
+        env:
+          TF_VAR_docker_host: ${{ vars.TF_DOCKER_HOST || 'unix:///var/run/docker.sock' }}
         run: |
           terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
-          # Refuses (exit 1) if this job reached a different Docker daemon or endpoint.
-          scripts/assert-same-daemon.sh check plan-daemon.txt
+          # Refuses (exit 1) on a different daemon/endpoint, a different infra/ workdir (the plan's
+          # absolute bind-mount paths), or any bind-mount path missing on this host.
+          scripts/assert-same-target.sh check plan-target.txt tfplan
           # A saved plan also refuses to apply if the state changed since it was made.
           terraform apply -auto-approve tfplan
       # ---- dry run: show what the hosted review plan contains ----

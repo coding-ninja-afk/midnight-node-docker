@@ -123,7 +123,7 @@ sample() {
   done
 }
 
-faults=() pending=()
+faults=() pending=() warnings=()
 check() {  # $1=kind (fault|pending) $2=label $3=detail $4...=test; runs inside "if" so set -e can't abort
   local kind="$1" label="$2" detail="$3"; shift 3
   if "$@"; then echo "PASS  $label  ($detail)"; return; fi
@@ -149,9 +149,16 @@ if ! dblogs="$(svc_logs cardano-db-sync 2>&1)"; then
 fi
 log_lines="$(grep -c . <<<"$dblogs" || true)"
 errors="$(grep -ciE ':Error:|\bException\b' <<<"$dblogs" || true)"
-# Passes only if logs were actually read (db-sync logs continuously) AND none are errors.
-check fault "5 no db-sync errors in last $LOG_WINDOW" "$errors error lines in $log_lines lines read" \
-  test "$log_lines" -gt 0 -a "$errors" -eq 0
+if (( log_lines > 0 )); then
+  check fault "5 no db-sync errors in last $LOG_WINDOW" "$errors error lines in $log_lines lines read" test "$errors" -eq 0
+else
+  # Nothing to read is not proof of a fault: if blocks are advancing (check 4), db-sync is working
+  # and only its logging is quiet or redirected. It is a WARNING (RESULT can still be READY), and it
+  # says plainly that "no errors" could not be confirmed. A real stall is check 4's FAULT.
+  w="5 no db-sync log lines in last $LOG_WINDOW: absence of errors NOT confirmed"
+  if (( advance > 0 )); then w="$w (blocks advanced $first_block -> $DB_BLOCK)"; else w="$w (single sample: run --advance to check progress)"; fi
+  echo "WARN  $w"; warnings+=("$w")
+fi
 if (( advance > 0 )); then
   check fault "4 block_no advanced over ${advance}s" "$first_block@$first_ts -> $DB_BLOCK@$TS" [ "$DB_BLOCK" -gt "$first_block" ]
 fi
@@ -162,6 +169,7 @@ check pending "3 newest block age < ${MAX_LAG_SECONDS}s" "${DB_LAG}s" [ "$DB_LAG
 (( advance > 0 )) || echo "SKIP  4 still advancing  (run with --advance 300)"
 
 echo
+warn_note=""; (( ${#warnings[@]} )) && warn_note=" [WARNING: ${#warnings[@]}, see WARN lines above]"
 if (( ${#faults[@]} )); then
   echo "RESULT: FAULT - failed check(s): $(IFS=';'; echo "${faults[*]}")"
   (( AHEAD_PERSISTED )) && echo "        db-sync has blocks the node doesn't: check for a node restart on an older DB," \
@@ -174,11 +182,11 @@ if (( ${#pending[@]} )); then
     rate=", db-sync rate $(( (DB_BLOCK - first_block) * 60 / ($(date -u +%s) - first_epoch_s) )) blocks/min"
   fi
   age="$(( DB_LAG / 86400 ))d $(( DB_LAG % 86400 / 3600 ))h"; (( DB_LAG < 86400 )) && age="${DB_LAG}s"
-  echo "RESULT: CATCHING UP - node at ${NODE_PROGRESS}%, db-sync $GAP blocks behind node, newest block $age old${rate}"
+  echo "RESULT: CATCHING UP - node at ${NODE_PROGRESS}%, db-sync $GAP blocks behind node, newest block $age old${rate}${warn_note}"
   exit 3
 fi
 if (( advance == 0 )); then
-  echo "RESULT: UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving"
+  echo "RESULT: UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving${warn_note}"
   exit 4
 fi
-echo "RESULT: READY - db-sync caught up and advancing; Midnight may start"
+echo "RESULT: READY - db-sync caught up and advancing; Midnight may start${warn_note}"

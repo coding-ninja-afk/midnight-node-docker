@@ -211,7 +211,7 @@ plan-time values (`output.container_specs`).
 | `scripts/mutation-test.sh` | a deliberate mistake is **not** caught. It applies 7 (published Postgres port, password in URL, RPC on 0.0.0.0, ungated start, missing indexer dependency, secret via `upload`, unpinned image) |
 | checkov `CKV2_MN_1..3` + secrets scan | Postgres publishes ports, `upload` used, privileged container, secret-like strings |
 | `scripts/smoke-test.sh` (real containers, below) | the modules do not actually work: init, TLS, role rights, secret ownership, midnight-node start |
-| `scripts/assert-same-daemon.sh` (tested locally: same daemon, other daemon, other endpoint, no record, unreachable) | a live apply would use a plan made against a different Docker daemon |
+| `scripts/assert-same-target.sh` (tested locally on real saved plans: same target phase 1 and phase 2; missing secret; other checkout; other daemon; swapped plan; non-local endpoint; unprovisioned secrets) | a live apply would use a plan made for a different daemon, workdir or set of host paths, or would bind-mount a missing file |
 
 ### Smoke test (`scripts/smoke-test.sh`)
 
@@ -254,17 +254,28 @@ never fired. It now matches the literal network alias.
 - **Push to `main`**: the same jobs, plus the smoke test.
   - **Live** (`vars.TF_LIVE_TARGET == 'true'`): `plan-live` runs on the self-hosted target runner
     (labels `self-hosted`, `midnight-preprod`). It plans against the remote state **and the live
-    Docker daemon**, and records that daemon's unique ID next to the saved plan.
+    Docker daemon**. Next to the saved plan it records the target with
+    `scripts/assert-same-target.sh record`:
+    - the daemon's unique ID and endpoint
+    - the `infra/` workdir (the modules' `abspath()` bakes the checkout path into the plan)
+    - every bind-mount host path in the plan
   - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers), runs on the
-    same runner label. It first runs `scripts/assert-same-daemon.sh check`, which refuses to apply
-    if this job reached a different daemon or endpoint. Then it applies exactly that plan
-    (Terraform also refuses a saved plan if the state changed since).
+    same runner label. It first runs `assert-same-target.sh check`, which refuses to apply on any
+    of these:
+    - a different daemon or endpoint
+    - a different workdir
+    - a plan whose paths differ from the record
+    - **any bind-mount path missing on this host.** Docker would otherwise silently create a
+      missing secret file as an empty directory.
+
+    Then it applies exactly that plan (Terraform also refuses a saved plan if the state changed
+    since).
   - **No live target:** `apply` is a dry run that prints the PR-style plan. That plan was made on a
     hosted runner's empty daemon, for review only, and is never applied.
-  - The Docker endpoint for every Terraform run is `vars.TF_DOCKER_HOST` (default: the runner's
-    socket), set once at the top of the workflow, so plan and apply cannot point at different
-    endpoints. The daemon-ID check covers the remaining case: the same endpoint string on two
-    different machines.
+  - The live Docker endpoint, `vars.TF_DOCKER_HOST` (default: the runner's own socket), is set
+    **only** on `plan-live` and on the live steps of `apply`. Hosted jobs never see it. Path checks
+    need the runner to be on the Docker host, so a non-`unix://` endpoint is refused. The runner
+    needs `docker`, `terraform` and `jq`.
 - Credentials: OIDC only (`id-token: write` on plan/apply only). Defaults to `contents: read`.
   `pull-requests: write` only on plan. Every action is pinned to a commit SHA (verified against
   its tag with `git ls-remote`). Terraform, tflint and checkov versions are pinned. actionlint is clean.

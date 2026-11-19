@@ -146,7 +146,7 @@ means **all** of these hold:
 | 2 | db-sync block vs node block | 0 ≤ gap ≤ 5 blocks | CATCHING UP |
 | 3 | age of db-sync's newest block | under 300 s | CATCHING UP |
 | 4 | still advancing | `block_no` higher after 300 s | FAULT |
-| 5 | logs | logs **were read** (at least one line in the last 15 min) and none is an `Error`/`Exception` | FAULT (unreadable logs: exit 2) |
+| 5 | logs | logs **were read** and none is an `Error`/`Exception` | FAULT. Unreadable logs: exit 2. No lines in the window: WARN only |
 
 ### Why these thresholds
 
@@ -182,8 +182,10 @@ from that:
   example a lost DB connection) and can look healthy between crash loops. 15 min covers
   several restart cycles. Older errors from a recovery you already handled don't block you.
   "No errors" only counts if the logs were actually read. A failed `docker logs` makes the
-  script exit 2 with the docker error. An empty window (db-sync logs continuously, so that means
-  it is stuck or logging is broken) is a FAULT, never a pass.
+  script exit 2 with the docker error. An **empty window is a WARNING**, not a fault: db-sync can
+  be working (blocks advancing, check 4) while its logging is quiet or redirected. The RESULT can
+  then still be READY, tagged `[WARNING: …]`, with a WARN line saying the absence of errors was
+  **not confirmed**. If blocks are not advancing either, check 4 makes it a FAULT anyway.
 
 Midnight itself only acts on Cardano data that is `CARDANO_SECURITY_PARAMETER` (2160 on
 PreProd) blocks deep, so these thresholds are stricter than Midnight strictly needs. That is on

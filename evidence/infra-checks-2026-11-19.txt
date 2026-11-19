@@ -1,5 +1,5 @@
 # infra/ verification run (all gates, docker provider 4.7.0)
-# run_utc: 2026-11-19T16:48:32Z
+# run_utc: 2026-11-19T17:30:42Z
 # terraform v1.17.2; tflint v0.66.0; checkov 3.4.5; actionlint 1.7.12; shellcheck v0.10.0
 
 == shellcheck (all scripts, from repo root)
@@ -7,10 +7,11 @@ clean (13 scripts)
 == actionlint
 clean
 == readiness scripts
-32 passed, 0 failed
-== assert-same-daemon
-same daemon: ok
-other daemon: exit 1 (want 1)
+33 passed, 0 failed
+== assert-same-target (real saved plans)
+same target: ok
+missing secret: exit 1 (want 1)
+other workdir: exit 1 (want 1)
 == fmt
 clean
 == validate

@@ -76,9 +76,13 @@ echo "No such container: midnight-preprod-cardano-db-sync-1" > "$D/logs_fail"
 out="$WORK/logs_unreadable.out"; PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" DBSYNC_RETRY_DELAY=0 "$SCRIPTS/dbsync-status.sh" --advance 1 > "$out" 2>&1; rc=$?
 if [[ $rc == 2 ]] && grep -q "could not read logs" "$out" && ! grep -q "^RESULT: READY" "$out"; then echo "ok    dbsync/logs_unreadable  (exit 2, not READY)"; pass=$((pass+1)); else echo "FAIL  dbsync/logs_unreadable exit $rc"; cat "$out"; fail=$((fail+1)); fi
 
-newcase logs_empty           # nothing to read in the window: cannot confirm "no errors"
+newcase logs_empty_advancing # quiet logs but blocks advance: a WARNING, still READY
 { row 1000 20; row 1003 15; } > "$D/db_rows"; { tip 1002 100.00; tip 1004 100.00; } > "$D/node_tips"; : > "$D/logs"
-dbsync_case logs_empty 1 "FAULT" "0 error lines in 0 lines read" --advance 1
+dbsync_case logs_empty_advancing 0 "READY .*\[WARNING: 1" "WARN  5 no db-sync log lines .* NOT confirmed (blocks advanced 1000 -> 1003)" --advance 1
+
+newcase logs_empty_stalled   # quiet logs AND no progress: FAULT (check 4), warning still shown
+{ row 1000 20; row 1000 400; } > "$D/db_rows"; { tip 1000 100.00; tip 1000 100.00; } > "$D/node_tips"; : > "$D/logs"
+dbsync_case logs_empty_stalled 1 "FAULT - failed check.s.: 4 block_no advanced" "WARN  5 no db-sync log lines" --advance 1
 
 newcase service_down
 row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; echo postgres > "$D/down"
