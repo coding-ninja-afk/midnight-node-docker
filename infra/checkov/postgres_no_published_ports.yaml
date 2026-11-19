@@ -1,0 +1,17 @@
+metadata:
+  id: "CKV2_MN_1"
+  name: "PostgreSQL container must not publish ports (reachable on the internal network only)"
+  category: "NETWORKING"
+# Matched on the literal network alias "postgres": the container name is built from a local,
+# which checkov cannot resolve (an earlier name-based version never fired; see mutation-test.sh).
+definition:
+  or:
+    - cond_type: attribute
+      resource_types: [docker_container]
+      attribute: networks_advanced.aliases
+      operator: not_contains
+      value: postgres
+    - cond_type: attribute
+      resource_types: [docker_container]
+      attribute: ports
+      operator: not_exists

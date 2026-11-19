@@ -60,7 +60,8 @@ so start this part first and leave it running.
 | `scripts/init-secrets.sh`         | creates `secrets/postgres_{db,user,password}`, never overwrites | yes |
 | `scripts/dbsync-status.sh`        | db-sync vs node: READY / CATCHING UP / FAULT (section 7)      | yes |
 | `scripts/midnight-height-check.sh`| timestamped Midnight samples: READY / CATCHING UP / FAULT (section 8) | yes |
-| `scripts/tests/run-tests.sh`      | 19 scenario tests for both checks (fake docker, mock RPC), about 70 s | yes |
+| `scripts/tests/run-tests.sh`      | 30 scenario tests for both checks, incl. Terraform-stack targeting (fake docker, mock RPC), about 70 s | yes |
+| `infra/`                          | the same stack as Terraform (Section 5): see `infra/README.md` | yes |
 | `secrets/`                        | DB credentials (mode 700/600)                                 | **no** (`.gitignore`) |
 | `evidence/`                       | captured sync output                                          | yes |
 
@@ -74,6 +75,9 @@ output. No service publishes a host port.
 ```bash
 # 1. Create DB credentials (db=cexplorer, user=postgres, random 32-hex password).
 scripts/init-secrets.sh
+#    Leave them 0600 and owned by you: the Postgres entrypoint reads *_FILE secrets as root
+#    before it drops to uid 999, and db-sync runs as root. No chown is needed, on a fresh volume
+#    or an existing one (verified by infra/scripts/smoke-test.sh, check O1, 2026-11-19).
 
 # 2. Start the stack. Compose project name is fixed to "midnight-preprod" inside the file.
 docker compose -f compose-partner-chains.yml up -d
@@ -100,6 +104,10 @@ What you should see:
 scripts/dbsync-status.sh                  # one sample: at best UNCONFIRMED
 scripts/dbsync-status.sh --advance 300    # two samples 5 min apart: can say READY
 watch -n 60 scripts/dbsync-status.sh      # live view
+
+# A Terraform-built stack (infra/) instead of this compose stack. Also printed by
+# `terraform output -raw dbsync_readiness_check`:
+scripts/dbsync-status.sh --stack tf:mn-preprod --network preprod --advance 300
 ```
 
 Each sample line is UTC-timestamped and shows the db-sync block, slot, epoch, block time and
@@ -189,8 +197,32 @@ purpose: the point is to prove the pipeline is healthy, not just that the data i
   database over TLS only" and ignores `ALLOW_NON_SSL`. The Postgres in
   `compose-partner-chains.yml` has no TLS yet, so add a server cert/key (`ssl=on`) first.
   That restarts Postgres; db-sync resumes on its own.
-- **Use a read-only DB role, not the superuser.** The docs use a `midnight` user. Create one
-  with `SELECT` on `cexplorer` and give its password to the node through a secret file.
+- **Use a read-only DB role, not the superuser, and pre-create the node's indexes.** The docs
+  use a `midnight` user: create it with `SELECT` on `cexplorer` (the Terraform stack does this in
+  `infra/modules/postgres/files/10-midnight-role.sh`, which **aborts** if its password file is
+  unreadable or empty instead of creating a password-less role). At startup, node 2.1.101 tries
+  to create **11 indexes** in the db-sync database. With a read-only role it exits:
+  `cannot execute CREATE INDEX in a read-only transaction` (smoke test, 2026-11-19). It skips any
+  index `pg_indexes` already lists, so create them once, **as the db-sync table owner**, after
+  DB Sync is READY and before starting Midnight. The script is verified against every
+  `CREATE INDEX` in the pinned node source (`infra/scripts/verify-index-defs.sh`) and is safe to
+  rerun (it rebuilds invalid leftovers and refuses conflicting definitions):
+  ```bash
+  docker compose -f compose-partner-chains.yml exec -T \
+    -e POSTGRES_DB_FILE=/run/secrets/postgres_db -e POSTGRES_USER_FILE=/run/secrets/postgres_user \
+    postgres bash < infra/modules/midnight-db-indexes/files/midnight-indexes.sh
+  ```
+  This uses the in-container socket (no `PGHOST`), so no password is needed. `CONCURRENTLY`
+  keeps db-sync writing. `tx_out` and `tx_in` are large: expect minutes on PreProd and much
+  longer on Mainnet.
+  *Caveat:* the genesis tools (`generate-cnight-genesis`, `generate-genesis-config`) also run
+  `ALTER TABLE … SET (autovacuum…)` on six db-sync tables. That needs table ownership, so run them
+  with the owner's credentials, never with the `midnight` role. The normal node run does not
+  do this (source: `node/src/command.rs`).
+- **Point the node at the CA, or it won't verify the certificate.** midnight-node ignores
+  `sslmode`/`sslrootcert` in `DB_SYNC_POSTGRES_CONNECTION_STRING` and uses its own `ssl_root_cert`
+  setting (env `SSL_ROOT_CERT`). Without it the connection is encrypted but **unverified**
+  (`PgSslMode::Require`; smoke test M8). Set `SSL_ROOT_CERT` to the CA file to get `VerifyFull`.
 - **Keep RPC private.** The docs say RPC binds to localhost by default and recommend
   `--rpc-methods Safe` behind a reverse proxy. The upstream repo's `--rpc-external --rpc-cors all`
   `--prometheus-external` is the opposite, so don't copy it. Only P2P (30333) should be public.
@@ -324,3 +356,6 @@ git-ignored on purpose, so git will not save you here.
 | upstream repo exposes RPC/metrics externally | RPC abuse | keep RPC on localhost (section 8.1) |
 | Disk headroom | 17 GB free vs about 20+ GB still needed | grow the disk before 100% (section 3) |
 | `docker compose down -v` | deletes all chain data | never use `-v` here |
+| Assumed: Postgres reads `*_FILE` as uid 999 (an earlier version of this runbook said to `chown 999`) | **wrong**: the entrypoint reads them as root, so a fresh volume initialises with operator-owned 0600 files | no chown needed (smoke test O1, 2026-11-19). Files Postgres opens *itself* later (a TLS key, the Terraform stack's `midnight_db_password`) do need uid 999: see `infra/README.md` "Secrets" |
+| midnight-node 2.1.101 creates indexes in the db-sync DB at startup | a read-only role makes it exit and restart-loop | pre-create the three indexes as the table owner (section 8.1) |
+| After a host reboot Docker starts all containers at once (Compose `depends_on` is not applied) | db-sync exits with "Connection refused" until Postgres is up, and recovers on its own (seen 2026-11-19 13:49 UTC: 2 restarts) | expected. `dbsync-status.sh` check 5 then reports FAULT for up to 15 min: rerun after that window before investigating |

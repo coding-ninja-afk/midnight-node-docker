@@ -1,0 +1,6 @@
+# Stub: create the bucket (versioning on, TLS-only policy, SSE-KMS) before first use.
+bucket       = "midnight-fno-tfstate"
+key          = "midnight/preprod/terraform.tfstate"
+region       = "eu-west-1"
+encrypt      = true
+use_lockfile = true

@@ -1,0 +1,257 @@
+# Terraform pipeline for infra/ (Section 5).
+#   pull_request -> static checks, terraform test (x3 envs), ordering + mutation checks,
+#                   readiness-script tests, then a plan per environment posted to the PR.
+#   push to main -> the same, then an apply job gated by the "preprod" GitHub Environment
+#                   (required reviewers). Without a live Docker target it is a dry run.
+# Credentials: OIDC only (no long-lived keys). State backend is used when vars.TF_STATE_ROLE_ARN
+# is set; otherwise a local backend override (the S3 backend is a stub until the bucket exists).
+name: infra
+
+on:
+  pull_request:
+    paths: ["infra/**", "scripts/**", ".github/workflows/infra.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", "scripts/**", ".github/workflows/infra.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TF_VERSION: "1.17.2"
+  TFLINT_VERSION: "v0.66.0"
+  CHECKOV_VERSION: "3.4.5"
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+defaults:
+  run:
+    working-directory: infra
+
+jobs:
+  static:
+    name: fmt / validate / tflint / checkov
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+      - name: terraform validate
+        run: |
+          terraform init -backend=false -lockfile=readonly
+          terraform validate
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - name: tflint
+        run: tflint --recursive --format compact
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: index definitions match the pinned midnight-node source (all CREATE INDEX in the tag)
+        run: scripts/verify-index-defs.sh
+      - name: checkov (terraform + secrets + custom CKV2_MN_* policies)
+        run: |
+          pip install --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
+          checkov --config-file .checkov.yaml
+
+  test:
+    name: terraform test (${{ matrix.env }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [preview, preprod, mainnet]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: terraform init -backend=false -lockfile=readonly
+      - name: terraform test (mock provider, no Docker daemon needed)
+        run: terraform test -var-file=envs/${{ matrix.env }}.tfvars
+      - name: start-up ordering is encoded in the dependency graph
+        run: scripts/check-order.sh
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: matrix.env == 'preprod'
+        with:
+          python-version: "3.12"
+      - name: mutation test (the gates catch deliberate mistakes)
+        if: matrix.env == 'preprod'
+        run: |
+          pip install --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
+          scripts/mutation-test.sh preprod
+
+  scripts:
+    name: readiness scripts (shellcheck + scenario tests)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: shellcheck -S style scripts/*.sh scripts/tests/run-tests.sh scripts/tests/fake-docker/docker infra/scripts/*.sh
+      - run: scripts/tests/run-tests.sh
+
+  smoke:
+    name: docker smoke test (fresh Postgres, TLS read-only role, midnight-node as uid 10001)
+    needs: [static]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      # --midnight require: the midnight-node checks may never be skipped here. Too little disk is
+      # exit 2 and any skip is exit 4, both of which fail the job; the report lists every check as
+      # PASS / FAIL / SKIP (with the reason) in the job summary and the uploaded artifact.
+      - name: smoke test (applies the real modules as mn-smoke-*, then destroys them)
+        run: infra/scripts/smoke-test.sh --midnight require -o smoke-report.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: smoke-report
+          path: smoke-report.txt
+          retention-days: 14
+
+  plan:
+    name: plan (${{ matrix.env }})
+    needs: [static, test, scripts]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write       # OIDC to the state backend, when configured
+      pull-requests: write  # plan comment
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [preview, preprod, mainnet]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Cloud credentials via OIDC (only when a state backend is configured)
+        if: vars.TF_STATE_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.TF_STATE_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+      - name: init
+        env:
+          STATE_ROLE: ${{ vars.TF_STATE_ROLE_ARN }}
+        run: |
+          if [ -n "$STATE_ROLE" ]; then
+            terraform init -lockfile=readonly -backend-config=envs/${{ matrix.env }}.s3.tfbackend
+          else
+            echo "No state backend configured: using a local backend override (stub)."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -lockfile=readonly
+          fi
+      - name: plan (against the runner's Docker daemon; creates nothing)
+        run: |
+          terraform plan -var-file=envs/${{ matrix.env }}.tfvars -out=tfplan -no-color | tee plan.log
+          terraform show -no-color tfplan > plan.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-${{ matrix.env }}
+          path: |
+            infra/tfplan
+            infra/plan.txt
+          retention-days: 7
+      - name: job summary
+        run: |
+          {
+            echo "### terraform plan: ${{ matrix.env }}"
+            echo '```'
+            grep -E '^Plan:|^No changes' plan.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: comment plan on the PR (one comment per environment, updated in place)
+        # Public repo: fork PRs get a read-only token, so only comment on same-repo PRs.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PLAN_ENV: ${{ matrix.env }}
+        with:
+          script: |
+            const fs = require('fs');
+            const env = process.env.PLAN_ENV;
+            const marker = `<!-- tf-plan-${env} -->`;
+            let plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            const summary = (fs.readFileSync('infra/plan.log', 'utf8').match(/^Plan:.*$/m) || ['No changes.'])[0];
+            if (plan.length > 60000) plan = plan.slice(0, 60000) + '\n... truncated: full plan in the plan-' + env + ' artifact';
+            const body = `${marker}\n### terraform plan: \`${env}\`\n**${summary}**\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find(c => c.body && c.body.startsWith(marker));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+  apply:
+    name: apply (preprod)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [plan, smoke]   # nothing is applied unless the smoke test passed on the same commit
+    # A live apply needs a runner that can reach the target Docker host (self-hosted).
+    runs-on: ${{ vars.TF_LIVE_TARGET == 'true' && 'self-hosted' || 'ubuntu-24.04' }}
+    environment: preprod   # required reviewers are configured on this Environment
+    concurrency:
+      group: infra-apply-preprod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Cloud credentials via OIDC (only when a state backend is configured)
+        if: vars.TF_STATE_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.TF_STATE_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+      - name: fetch the reviewed plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: plan-preprod
+          path: infra
+      - name: apply the reviewed plan, or dry-run
+        env:
+          LIVE: ${{ vars.TF_LIVE_TARGET }}
+          STATE_ROLE: ${{ vars.TF_STATE_ROLE_ARN }}
+        run: |
+          if [ "$LIVE" = "true" ]; then
+            # The reviewed plan must have been made against the real state backend.
+            [ -n "$STATE_ROLE" ] || { echo "::error::TF_LIVE_TARGET=true requires TF_STATE_ROLE_ARN (remote state)"; exit 1; }
+            terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
+            # A saved plan refuses to apply if state changed since it was made.
+            terraform apply -auto-approve tfplan
+          else
+            {
+              echo "### apply (preprod): DRY RUN"
+              echo "No live Docker target is configured for hosted runners (vars.TF_LIVE_TARGET != 'true')."
+              echo "This approved plan is what would be applied:"
+              echo '```'
+              grep -E '^Plan:|^No changes' plan.txt || head -40 plan.txt
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

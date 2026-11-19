@@ -1,0 +1,13 @@
+# checkov 3.4.5 (pinned in CI). Built-in policies barely cover the Docker provider, so the
+# stack's own rules live in checkov/ (CKV2_MN_*); terraform tests cover the rest.
+directory:
+  - .
+framework:
+  - terraform
+  - secrets
+external-checks-dir:
+  - checkov
+skip-path:
+  - .terraform
+compact: true
+quiet: false

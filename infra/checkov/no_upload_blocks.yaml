@@ -1,0 +1,9 @@
+metadata:
+  id: "CKV2_MN_2"
+  name: "docker_container must not use upload blocks (file content is stored in Terraform state)"
+  category: "SECRETS"
+definition:
+  cond_type: attribute
+  resource_types: [docker_container]
+  attribute: upload
+  operator: not_exists

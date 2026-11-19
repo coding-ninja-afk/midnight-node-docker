@@ -1,0 +1,1417 @@
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.cardano_db_sync.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = (known after apply)
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + destroy_grace_seconds                       = 60
+      + entrypoint                                  = (known after apply)
+      + env                                         = [
+          + "NETWORK=preprod",
+          + "POSTGRES_HOST=postgres",
+          + "POSTGRES_PORT=5432",
+        ]
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = true
+      + name                                        = "mn-preprod-cardano-db-sync"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "unless-stopped"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = (known after apply)
+      + shm_size                                    = (known after apply)
+      + start                                       = true
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = 60
+      + tty                                         = false
+      + wait                                        = false
+      + wait_timeout                                = 60
+
+      + healthcheck (known after apply)
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "cardano-db-sync"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + networks_advanced {
+          + aliases        = []
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-internal"
+            # (3 unchanged attributes hidden)
+        }
+
+      + volumes {
+          + container_path  = "/node-ipc"
+          + volume_name     = "mn-preprod-cardano-node-ipc"
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_db"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_db"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_password"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_password"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_user"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_user"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/var/lib/cexplorer"
+          + volume_name     = "mn-preprod-cardano-db-sync-state"
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.cardano_db_sync.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "ghcr.io/intersectmbo/cardano-db-sync:13.7.1.0@sha256:b84a0b8b281fa36da1f137668d2079d5758718ae8c1f36ebf5d11063ad915af9"
+      + repo_digest  = (known after apply)
+    }
+
+  # module.cardano_db_sync.docker_volume.state will be created
+  + resource "docker_volume" "state" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-cardano-db-sync-state"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "cardano-db-sync"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+      + labels {
+          + label = "mn.storage-gb"
+          + value = "10"
+        }
+    }
+
+  # module.cardano_node.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = (known after apply)
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + destroy_grace_seconds                       = 120
+      + entrypoint                                  = (known after apply)
+      + env                                         = [
+          + "CARDANO_NODE_SOCKET_PATH=/ipc/node.socket",
+          + "NETWORK=preprod",
+        ]
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = true
+      + name                                        = "mn-preprod-cardano-node"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "unless-stopped"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = (known after apply)
+      + shm_size                                    = (known after apply)
+      + start                                       = true
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = 120
+      + tty                                         = false
+      + wait                                        = true
+      + wait_timeout                                = 900
+
+      + healthcheck {
+          + interval       = "30s"
+          + retries        = 5
+          + start_interval = "0s"
+          + start_period   = "10m"
+          + test           = [
+              + "CMD-SHELL",
+              + "test -S /ipc/node.socket",
+            ]
+          + timeout        = "5s"
+        }
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "cardano-node"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + networks_advanced {
+          + aliases        = []
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-p2p"
+            # (3 unchanged attributes hidden)
+        }
+
+      + ports {
+          + external = 3001
+          + internal = 3001
+          + ip       = "0.0.0.0"
+          + protocol = "tcp"
+        }
+
+      + volumes {
+          + container_path  = "/data"
+          + volume_name     = "mn-preprod-cardano-node-data"
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/ipc"
+          + volume_name     = "mn-preprod-cardano-node-ipc"
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.cardano_node.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "ghcr.io/intersectmbo/cardano-node:11.0.1@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99"
+      + repo_digest  = (known after apply)
+    }
+
+  # module.cardano_node.docker_volume.data will be created
+  + resource "docker_volume" "data" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-cardano-node-data"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "cardano-node"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+      + labels {
+          + label = "mn.storage-gb"
+          + value = "60"
+        }
+    }
+
+  # module.cardano_node.docker_volume.ipc will be created
+  + resource "docker_volume" "ipc" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-cardano-node-ipc"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "cardano-node"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+    }
+
+  # module.midnight_indexer.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = (known after apply)
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + destroy_grace_seconds                       = 60
+      + entrypoint                                  = (known after apply)
+      + env                                         = [
+          + "APP__APPLICATION__NETWORK_ID=preprod",
+          + "APP__INFRA__NODE__URL=ws://midnight-node:9944",
+          + "APP__INFRA__SECRET_FILE=/run/secrets/indexer/secret",
+          + "APP__INFRA__SPO_NODE__BLOCKFROST_ID_FILE=/run/secrets/indexer/blockfrost_id",
+          + "APP__INFRA__SPO_NODE__URL=ws://midnight-node:9944",
+        ]
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = false
+      + name                                        = "mn-preprod-midnight-indexer"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "unless-stopped"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = [
+          + "no-new-privileges:true",
+        ]
+      + shm_size                                    = (known after apply)
+      + start                                       = false
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = 60
+      + tty                                         = false
+      + wait                                        = false
+      + wait_timeout                                = 60
+
+      + capabilities {
+          + add  = []
+          + drop = [
+              + "ALL",
+            ]
+        }
+
+      + healthcheck {
+          + interval       = "30s"
+          + retries        = 3
+          + start_interval = "0s"
+          + start_period   = "1m"
+          + test           = [
+              + "CMD-SHELL",
+              + "test -f /var/run/indexer-standalone/running",
+            ]
+          + timeout        = "5s"
+        }
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "midnight-indexer"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + networks_advanced {
+          + aliases        = []
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-edge"
+            # (3 unchanged attributes hidden)
+        }
+      + networks_advanced {
+          + aliases        = []
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-internal"
+            # (3 unchanged attributes hidden)
+        }
+
+      + ports {
+          + external = 8088
+          + internal = 8088
+          + ip       = "127.0.0.1"
+          + protocol = "tcp"
+        }
+
+      + volumes {
+          + container_path  = "/data"
+          + volume_name     = "mn-preprod-midnight-indexer-data"
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/indexer/blockfrost_id"
+          + host_path       = "/run/mn-preprod-secrets/indexer/blockfrost_id"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/indexer/secret"
+          + host_path       = "/run/mn-preprod-secrets/indexer/secret"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.midnight_indexer.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "midnightntwrk/indexer-standalone:4.4.101@sha256:119f35db548ba1c390845f215bb1e928e73038bef7c315825aee0461bd54499d"
+      + repo_digest  = (known after apply)
+    }
+
+  # module.midnight_indexer.docker_volume.data will be created
+  + resource "docker_volume" "data" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-midnight-indexer-data"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "midnight-indexer"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+      + labels {
+          + label = "mn.storage-gb"
+          + value = "20"
+        }
+    }
+
+  # module.midnight_node.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = [
+          + "--chain",
+          + "/res/preprod/chain-spec-raw.json",
+          + "--base-path",
+          + "/node/chain",
+          + "--name",
+          + "mn-preprod-fno",
+          + "--port",
+          + "30333",
+          + "--rpc-port",
+          + "9944",
+          + "--rpc-external",
+          + "--rpc-methods",
+          + "Safe",
+          + "--prometheus-port",
+          + "9615",
+          + "--prometheus-external",
+          + "--pool-limit",
+          + "35",
+          + "--no-private-ip",
+        ]
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + destroy_grace_seconds                       = 120
+      + entrypoint                                  = (known after apply)
+      + env                                         = [
+          + "CARDANO_SECURITY_PARAMETER=2160",
+          + "CFG_PRESET=preprod",
+          + "DB_SYNC_POSTGRES_CONNECTION_STRING=postgres://midnight@postgres:5432/cexplorer?sslmode=verify-full&sslrootcert=/run/secrets/midnight/postgres-ca.crt",
+          + "PGPASSFILE=/run/secrets/midnight/pgpass",
+        ]
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = false
+      + name                                        = "mn-preprod-midnight-node"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "unless-stopped"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = [
+          + "no-new-privileges:true",
+        ]
+      + shm_size                                    = (known after apply)
+      + start                                       = false
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = 120
+      + tty                                         = false
+      + user                                        = "10001:10001"
+      + wait                                        = false
+      + wait_timeout                                = 300
+
+      + capabilities {
+          + add  = []
+          + drop = [
+              + "ALL",
+            ]
+        }
+
+      + healthcheck {
+          + interval       = "30s"
+          + retries        = 5
+          + start_interval = "0s"
+          + start_period   = "2m"
+          + test           = [
+              + "CMD-SHELL",
+              + "curl -fsS -m 5 -H 'Content-Type: application/json' -d '{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"system_health\",\"params\":[]}' http://127.0.0.1:9944 >/dev/null",
+            ]
+          + timeout        = "10s"
+        }
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "midnight-node"
+        }
+      + labels {
+          + label = "mn.dbsync-ready-at"
+            # (1 unchanged attribute hidden)
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + networks_advanced {
+          + aliases        = [
+              + "midnight-node",
+            ]
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-internal"
+            # (3 unchanged attributes hidden)
+        }
+      + networks_advanced {
+          + aliases        = []
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-p2p"
+            # (3 unchanged attributes hidden)
+        }
+
+      + ports {
+          + external = 30333
+          + internal = 30333
+          + ip       = "0.0.0.0"
+          + protocol = "tcp"
+        }
+      + ports {
+          + external = 9944
+          + internal = 9944
+          + ip       = "127.0.0.1"
+          + protocol = "tcp"
+        }
+
+      + volumes {
+          + container_path  = "/node/chain"
+          + volume_name     = "mn-preprod-midnight-node-data"
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/midnight/pgpass"
+          + host_path       = "/run/mn-preprod-secrets/midnight/pgpass"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/midnight/postgres-ca.crt"
+          + host_path       = "/run/mn-preprod-secrets/midnight/postgres-ca.crt"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.midnight_node.docker_container.volume_init will be created
+  + resource "docker_container" "volume_init" {
+      + attach                                      = true
+      + bridge                                      = (known after apply)
+      + command                                     = [
+          + "chown 10001:10001 /node/chain && chmod 0700 /node/chain",
+        ]
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + entrypoint                                  = [
+          + "/bin/sh",
+          + "-c",
+        ]
+      + env                                         = (known after apply)
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = false
+      + name                                        = "mn-preprod-midnight-node-volume-init"
+      + network_data                                = (known after apply)
+      + network_mode                                = "none"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "no"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = (known after apply)
+      + shm_size                                    = (known after apply)
+      + start                                       = true
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = (known after apply)
+      + tty                                         = false
+      + user                                        = "0:0"
+      + wait                                        = false
+      + wait_timeout                                = 60
+
+      + healthcheck (known after apply)
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "midnight-node-init"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + volumes {
+          + container_path  = "/node/chain"
+          + volume_name     = "mn-preprod-midnight-node-data"
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.midnight_node.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "midnightntwrk/midnight-node:2.1.101@sha256:0c1ad548d523c1109aa1f16daab1bf72dcb78c7e17b8a8c6d97424ad0eba7b8a"
+      + repo_digest  = (known after apply)
+    }
+
+  # module.midnight_node.docker_volume.data will be created
+  + resource "docker_volume" "data" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-midnight-node-data"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "midnight-node"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+      + labels {
+          + label = "mn.storage-gb"
+          + value = "50"
+        }
+    }
+
+  # module.network.docker_network.edge will be created
+  + resource "docker_network" "edge" {
+      + driver      = "bridge"
+      + id          = (known after apply)
+      + internal    = (known after apply)
+      + ipam_driver = "default"
+      + name        = "mn-preprod-edge"
+      + options     = {
+          + "com.docker.network.bridge.enable_ip_masquerade" = "false"
+        }
+      + scope       = (known after apply)
+
+      + ipam_config (known after apply)
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+    }
+
+  # module.network.docker_network.internal will be created
+  + resource "docker_network" "internal" {
+      + driver      = "bridge"
+      + id          = (known after apply)
+      + internal    = true
+      + ipam_driver = "default"
+      + name        = "mn-preprod-internal"
+      + options     = (known after apply)
+      + scope       = (known after apply)
+
+      + ipam_config (known after apply)
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+    }
+
+  # module.network.docker_network.p2p will be created
+  + resource "docker_network" "p2p" {
+      + driver      = "bridge"
+      + id          = (known after apply)
+      + internal    = (known after apply)
+      + ipam_driver = "default"
+      + name        = "mn-preprod-p2p"
+      + options     = (known after apply)
+      + scope       = (known after apply)
+
+      + ipam_config (known after apply)
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+    }
+
+  # module.postgres.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = [
+          + "postgres",
+          + "-c",
+          + "ssl=on",
+          + "-c",
+          + "ssl_cert_file=/run/secrets/tls/server.crt",
+          + "-c",
+          + "ssl_key_file=/run/secrets/tls/server.key",
+          + "-c",
+          + "ssl_min_protocol_version=TLSv1.2",
+          + "-c",
+          + "hba_file=/etc/postgresql/pg_hba.conf",
+          + "-c",
+          + "password_encryption=scram-sha-256",
+          + "-c",
+          + "effective_cache_size=8GB",
+          + "-c",
+          + "maintenance_work_mem=1GB",
+          + "-c",
+          + "max_parallel_maintenance_workers=4",
+          + "-c",
+          + "max_wal_size=4GB",
+          + "-c",
+          + "shared_buffers=2GB",
+        ]
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + destroy_grace_seconds                       = 120
+      + entrypoint                                  = (known after apply)
+      + env                                         = [
+          + "MIDNIGHT_DB_PASSWORD_FILE=/run/secrets/midnight_db_password",
+          + "POSTGRES_DB_FILE=/run/secrets/postgres_db",
+          + "POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password",
+          + "POSTGRES_USER_FILE=/run/secrets/postgres_user",
+        ]
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = "json-file"
+      + log_opts                                    = {
+          + "max-file" = "5"
+          + "max-size" = "50m"
+        }
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = true
+      + name                                        = "mn-preprod-postgres"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "unless-stopped"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = (known after apply)
+      + shm_size                                    = 1024
+      + start                                       = true
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = 120
+      + tty                                         = false
+      + wait                                        = true
+      + wait_timeout                                = 180
+
+      + healthcheck {
+          + interval       = "10s"
+          + retries        = 10
+          + start_interval = "0s"
+          + start_period   = "0s"
+          + test           = [
+              + "CMD-SHELL",
+              + "pg_isready -U \"$(cat /run/secrets/postgres_user)\" -d \"$(cat /run/secrets/postgres_db)\"",
+            ]
+          + timeout        = "5s"
+        }
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "postgres"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+
+      + networks_advanced {
+          + aliases        = [
+              + "postgres",
+            ]
+          + driver_opts    = []
+          + link_local_ips = []
+          + name           = "mn-preprod-internal"
+            # (3 unchanged attributes hidden)
+        }
+
+      + volumes {
+          + container_path  = "/docker-entrypoint-initdb.d/10-midnight-role.sh"
+          + host_path       = "/home/abc/projects/midnight-node-docker/infra/modules/postgres/files/10-midnight-role.sh"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/etc/postgresql/pg_hba.conf"
+          + host_path       = "/home/abc/projects/midnight-node-docker/infra/modules/postgres/files/pg_hba.conf"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/midnight_db_password"
+          + host_path       = "/run/mn-preprod-secrets/postgres/midnight_db_password"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_db"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_db"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_password"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_password"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/postgres_user"
+          + host_path       = "/run/mn-preprod-secrets/postgres/postgres_user"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/tls/server.crt"
+          + host_path       = "/run/mn-preprod-secrets/postgres/tls/server.crt"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/run/secrets/tls/server.key"
+          + host_path       = "/run/mn-preprod-secrets/postgres/tls/server.key"
+          + read_only       = true
+            # (3 unchanged attributes hidden)
+        }
+      + volumes {
+          + container_path  = "/var/lib/postgresql/data"
+          + volume_name     = "mn-preprod-postgres-data"
+            # (3 unchanged attributes hidden)
+        }
+    }
+
+  # module.postgres.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "postgres:17.12-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536"
+      + repo_digest  = (known after apply)
+    }
+
+  # module.postgres.docker_volume.data will be created
+  + resource "docker_volume" "data" {
+      + driver     = (known after apply)
+      + id         = (known after apply)
+      + mountpoint = (known after apply)
+      + name       = "mn-preprod-postgres-data"
+
+      + labels {
+          + label = "managed-by"
+          + value = "terraform"
+        }
+      + labels {
+          + label = "mn.component"
+          + value = "postgres"
+        }
+      + labels {
+          + label = "mn.network"
+          + value = "preprod"
+        }
+      + labels {
+          + label = "mn.repo-dir"
+          + value = "infra"
+        }
+      + labels {
+          + label = "mn.stack"
+          + value = "mn-preprod"
+        }
+      + labels {
+          + label = "mn.storage-gb"
+          + value = "120"
+        }
+    }
+
+Plan: 20 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + container_specs          = {
+      + cardano_db_sync  = {
+          + env         = [
+              + "NETWORK=preprod",
+              + "POSTGRES_HOST=postgres",
+              + "POSTGRES_PORT=5432",
+            ]
+          + host_mounts = [
+              + {
+                  + container_path = "/run/secrets/postgres_db"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_db"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/postgres_password"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_password"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/postgres_user"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_user"
+                  + read_only      = true
+                },
+            ]
+          + image       = "ghcr.io/intersectmbo/cardano-db-sync:13.7.1.0@sha256:b84a0b8b281fa36da1f137668d2079d5758718ae8c1f36ebf5d11063ad915af9"
+          + name        = "mn-preprod-cardano-db-sync"
+          + networks    = [
+              + "mn-preprod-internal",
+            ]
+          + ports       = []
+          + start       = true
+          + uploads     = 0
+        }
+      + cardano_node     = {
+          + env         = [
+              + "CARDANO_NODE_SOCKET_PATH=/ipc/node.socket",
+              + "NETWORK=preprod",
+            ]
+          + host_mounts = []
+          + image       = "ghcr.io/intersectmbo/cardano-node:11.0.1@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99"
+          + name        = "mn-preprod-cardano-node"
+          + networks    = [
+              + "mn-preprod-p2p",
+            ]
+          + ports       = [
+              + {
+                  + external = 3001
+                  + internal = 3001
+                  + ip       = "0.0.0.0"
+                },
+            ]
+          + start       = true
+          + uploads     = 0
+        }
+      + midnight_indexer = {
+          + cap_drop      = [
+              + "ALL",
+            ]
+          + env           = [
+              + "APP__APPLICATION__NETWORK_ID=preprod",
+              + "APP__INFRA__NODE__URL=ws://midnight-node:9944",
+              + "APP__INFRA__SECRET_FILE=/run/secrets/indexer/secret",
+              + "APP__INFRA__SPO_NODE__BLOCKFROST_ID_FILE=/run/secrets/indexer/blockfrost_id",
+              + "APP__INFRA__SPO_NODE__URL=ws://midnight-node:9944",
+            ]
+          + host_mounts   = [
+              + {
+                  + container_path = "/run/secrets/indexer/blockfrost_id"
+                  + host_path      = "/run/mn-preprod-secrets/indexer/blockfrost_id"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/indexer/secret"
+                  + host_path      = "/run/mn-preprod-secrets/indexer/secret"
+                  + read_only      = true
+                },
+            ]
+          + image         = "midnightntwrk/indexer-standalone:4.4.101@sha256:119f35db548ba1c390845f215bb1e928e73038bef7c315825aee0461bd54499d"
+          + must_run      = false
+          + name          = "mn-preprod-midnight-indexer"
+          + networks      = [
+              + "mn-preprod-edge",
+              + "mn-preprod-internal",
+            ]
+          + ports         = [
+              + {
+                  + external = 8088
+                  + internal = 8088
+                  + ip       = "127.0.0.1"
+                },
+            ]
+          + security_opts = [
+              + "no-new-privileges:true",
+            ]
+          + start         = false
+          + uploads       = 0
+          + wait          = false
+        }
+      + midnight_init    = {
+          + attach       = true
+          + env          = (known after apply)
+          + host_mounts  = []
+          + must_run     = false
+          + name         = "mn-preprod-midnight-node-volume-init"
+          + network_mode = "none"
+          + ports        = []
+          + uploads      = 0
+        }
+      + midnight_node    = {
+          + cap_drop      = [
+              + "ALL",
+            ]
+          + command       = [
+              + "--chain",
+              + "/res/preprod/chain-spec-raw.json",
+              + "--base-path",
+              + "/node/chain",
+              + "--name",
+              + "mn-preprod-fno",
+              + "--port",
+              + "30333",
+              + "--rpc-port",
+              + "9944",
+              + "--rpc-external",
+              + "--rpc-methods",
+              + "Safe",
+              + "--prometheus-port",
+              + "9615",
+              + "--prometheus-external",
+              + "--pool-limit",
+              + "35",
+              + "--no-private-ip",
+            ]
+          + env           = [
+              + "CARDANO_SECURITY_PARAMETER=2160",
+              + "CFG_PRESET=preprod",
+              + "DB_SYNC_POSTGRES_CONNECTION_STRING=postgres://midnight@postgres:5432/cexplorer?sslmode=verify-full&sslrootcert=/run/secrets/midnight/postgres-ca.crt",
+              + "PGPASSFILE=/run/secrets/midnight/pgpass",
+            ]
+          + has_health    = true
+          + host_mounts   = [
+              + {
+                  + container_path = "/run/secrets/midnight/pgpass"
+                  + host_path      = "/run/mn-preprod-secrets/midnight/pgpass"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/midnight/postgres-ca.crt"
+                  + host_path      = "/run/mn-preprod-secrets/midnight/postgres-ca.crt"
+                  + read_only      = true
+                },
+            ]
+          + image         = "midnightntwrk/midnight-node:2.1.101@sha256:0c1ad548d523c1109aa1f16daab1bf72dcb78c7e17b8a8c6d97424ad0eba7b8a"
+          + must_run      = false
+          + name          = "mn-preprod-midnight-node"
+          + networks      = [
+              + "mn-preprod-internal",
+              + "mn-preprod-p2p",
+            ]
+          + ports         = [
+              + {
+                  + external = 30333
+                  + internal = 30333
+                  + ip       = "0.0.0.0"
+                },
+              + {
+                  + external = 9944
+                  + internal = 9944
+                  + ip       = "127.0.0.1"
+                },
+            ]
+          + security_opts = [
+              + "no-new-privileges:true",
+            ]
+          + start         = false
+          + uploads       = 0
+          + user          = "10001:10001"
+          + wait          = false
+        }
+      + postgres         = {
+          + command     = [
+              + "postgres",
+              + "-c",
+              + "ssl=on",
+              + "-c",
+              + "ssl_cert_file=/run/secrets/tls/server.crt",
+              + "-c",
+              + "ssl_key_file=/run/secrets/tls/server.key",
+              + "-c",
+              + "ssl_min_protocol_version=TLSv1.2",
+              + "-c",
+              + "hba_file=/etc/postgresql/pg_hba.conf",
+              + "-c",
+              + "password_encryption=scram-sha-256",
+              + "-c",
+              + "effective_cache_size=8GB",
+              + "-c",
+              + "maintenance_work_mem=1GB",
+              + "-c",
+              + "max_parallel_maintenance_workers=4",
+              + "-c",
+              + "max_wal_size=4GB",
+              + "-c",
+              + "shared_buffers=2GB",
+            ]
+          + env         = [
+              + "MIDNIGHT_DB_PASSWORD_FILE=/run/secrets/midnight_db_password",
+              + "POSTGRES_DB_FILE=/run/secrets/postgres_db",
+              + "POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password",
+              + "POSTGRES_USER_FILE=/run/secrets/postgres_user",
+            ]
+          + host_mounts = [
+              + {
+                  + container_path = "/docker-entrypoint-initdb.d/10-midnight-role.sh"
+                  + host_path      = "/home/abc/projects/midnight-node-docker/infra/modules/postgres/files/10-midnight-role.sh"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/etc/postgresql/pg_hba.conf"
+                  + host_path      = "/home/abc/projects/midnight-node-docker/infra/modules/postgres/files/pg_hba.conf"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/midnight_db_password"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/midnight_db_password"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/postgres_db"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_db"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/postgres_password"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_password"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/postgres_user"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/postgres_user"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/tls/server.crt"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/tls/server.crt"
+                  + read_only      = true
+                },
+              + {
+                  + container_path = "/run/secrets/tls/server.key"
+                  + host_path      = "/run/mn-preprod-secrets/postgres/tls/server.key"
+                  + read_only      = true
+                },
+            ]
+          + image       = "postgres:17.12-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536"
+          + name        = "mn-preprod-postgres"
+          + networks    = [
+              + "mn-preprod-internal",
+            ]
+          + ports       = []
+          + start       = true
+          + uploads     = 0
+        }
+    }
+  + dbsync_readiness_check   = "scripts/dbsync-status.sh --stack tf:mn-preprod --network preprod --advance 300"
+  + endpoints                = {
+      + cardano_p2p  = "0.0.0.0:3001"
+      + indexer_api  = "http://127.0.0.1:8088"
+      + midnight_p2p = "0.0.0.0:30333"
+      + midnight_rpc = "127.0.0.1:9944"
+    }
+  + midnight_readiness_check = "MIDNIGHT_RPC_URL=http://127.0.0.1:9944 scripts/midnight-height-check.sh -n 3 -i 60"
+  + networks                 = {
+      + edge     = {
+          + internal = (known after apply)
+          + name     = "mn-preprod-edge"
+          + options  = {
+              + "com.docker.network.bridge.enable_ip_masquerade" = "false"
+            }
+        }
+      + internal = {
+          + internal = true
+          + name     = "mn-preprod-internal"
+          + options  = (known after apply)
+        }
+      + p2p      = {
+          + internal = (known after apply)
+          + name     = "mn-preprod-p2p"
+          + options  = (known after apply)
+        }
+    }
+  + stack_prefix             = "mn-preprod"
+  + volumes                  = {
+      + cardano_node  = {
+          + name       = "mn-preprod-cardano-node-data"
+          + storage_gb = 60
+        }
+      + dbsync_state  = {
+          + name       = "mn-preprod-cardano-db-sync-state"
+          + storage_gb = 10
+        }
+      + indexer       = {
+          + name       = "mn-preprod-midnight-indexer-data"
+          + storage_gb = 20
+        }
+      + midnight_node = {
+          + name       = "mn-preprod-midnight-node-data"
+          + storage_gb = 50
+        }
+      + postgres      = {
+          + name       = "mn-preprod-postgres-data"
+          + storage_gb = 120
+        }
+    }
+
+─────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so Terraform can't
+guarantee to take exactly these actions if you run "terraform apply" now.

@@ -3,8 +3,12 @@
 # READY / CATCHING UP / FAULT using the criteria in RUNBOOK.md section 7. All times UTC.
 #
 # Usage:
-#   scripts/dbsync-status.sh                 one sample (can at most say UNCONFIRMED)
-#   scripts/dbsync-status.sh --advance 300   two samples 300 s apart (can say READY)
+#   scripts/dbsync-status.sh [--advance SECONDS] [--stack STACK] [--network NETWORK]
+#     --advance 300        two samples 300 s apart (needed for READY; one sample = UNCONFIRMED)
+#     --stack compose      the hand-built stack in compose-partner-chains.yml (default)
+#     --stack tf:PREFIX    a Terraform-built stack: containers PREFIX-{cardano-node,postgres,
+#                          cardano-db-sync}, e.g. tf:mn-preprod (infra/ output dbsync_readiness_check)
+#     --network NAME       preprod (default) | preview | mainnet: selects cardano-cli's network magic
 #
 # Exit codes (shared with scripts/midnight-height-check.sh):
 #   0 READY        caught up and still advancing; Midnight may start
@@ -21,24 +25,46 @@ cd "$(dirname "$0")/.."
 MAX_BLOCK_GAP=5        # node block - db-sync block
 MAX_LAG_SECONDS=300    # age of db-sync's newest block
 LOG_WINDOW=15m         # window for the "no errors" check
-PREPROD_MAGIC=1        # PreProd network magic
 RETRIES="${DBSYNC_RETRIES:-3}"
 RETRY_DELAY="${DBSYNC_RETRY_DELAY:-5}"
 
-usage() { echo "usage: $0 [--advance SECONDS]" >&2; exit 2; }
-advance=0
-if [[ "${1:-}" == "--advance" ]]; then
-  advance="${2:-}"
-  [[ "$advance" =~ ^[0-9]+$ && "$advance" -gt 0 ]] || usage
-elif [[ $# -gt 0 ]]; then
-  usage
-fi
+usage() { echo "usage: $0 [--advance SECONDS] [--stack compose|tf:PREFIX] [--network preprod|preview|mainnet]" >&2; exit 2; }
+advance=0 stack=compose network=preprod
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --advance) advance="${2:-}"; [[ "$advance" =~ ^[0-9]+$ && "$advance" -gt 0 ]] || usage; shift 2 ;;
+    --stack)   stack="${2:-}"; [[ "$stack" == compose || "$stack" =~ ^tf:[a-z0-9][a-z0-9-]*$ ]] || usage; shift 2 ;;
+    --network) network="${2:-}"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+case "$network" in
+  preprod) magic=(--testnet-magic 1) ;;
+  preview) magic=(--testnet-magic 2) ;;
+  mainnet) magic=(--mainnet) ;;
+  *) usage ;;
+esac
 
-dc() { docker compose -f compose-partner-chains.yml "$@"; }
+# Stack adapters: the same checks run against the compose stack or a Terraform-built one.
+#   svc_running SVC / svc_exec SVC CMD... / svc_logs SVC   (SVC = cardano-node|postgres|cardano-db-sync)
+if [[ "$stack" == compose ]]; then
+  dc() { docker compose -f compose-partner-chains.yml "$@"; }
+  svc_running() { [[ -n "$(dc ps --status running -q "$1" 2>/dev/null)" ]]; }
+  svc_exec()    { local s="$1"; shift; dc exec -T "$s" "$@"; }
+  svc_logs()    { dc logs --no-color --since "$LOG_WINDOW" "$1"; }
+  where() { echo "compose service '$1'"; }
+else
+  prefix="${stack#tf:}"
+  svc_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$prefix-$1" 2>/dev/null)" == true ]]; }
+  svc_exec()    { local s="$1"; shift; docker exec -i "$prefix-$s" "$@"; }
+  svc_logs()    { docker logs --since "$LOG_WINDOW" "$prefix-$1"; }
+  where() { echo "container '$prefix-$1'"; }
+fi
+echo "# stack=$stack network=$network"
 
 for svc in cardano-node postgres cardano-db-sync; do
-  if [[ -z "$(dc ps --status running -q "$svc" 2>/dev/null)" ]]; then
-    echo "error: service '$svc' is not running (docker compose -f compose-partner-chains.yml ps)" >&2
+  if ! svc_running "$svc"; then
+    echo "error: $(where "$svc") is not running" >&2
     exit 2
   fi
 done
@@ -46,7 +72,7 @@ done
 # psql over the in-container socket; credentials never leave the container.
 # shellcheck disable=SC2016  # $(cat ...) must expand inside the container, not here
 psql_q() {
-  dc exec -T postgres sh -c \
+  svc_exec postgres sh -c \
     'psql -X -At -F "|" -v ON_ERROR_STOP=1 -U "$(cat /run/secrets/postgres_user)" -d "$(cat /run/secrets/postgres_db)" -c "$1"' _ "$1"
 }
 
@@ -65,7 +91,7 @@ read_once() {
   [[ -n "$row" ]] || { echo "error: db-sync has not inserted any block yet" >&2; exit 2; }
   IFS='|' read -r DB_BLOCK DB_SLOT DB_EPOCH DB_TIME DB_LAG <<<"$row"
 
-  tip="$(dc exec -T cardano-node cardano-cli query tip --testnet-magic "$PREPROD_MAGIC" --socket-path /ipc/node.socket)" \
+  tip="$(svc_exec cardano-node cardano-cli query tip "${magic[@]}" --socket-path /ipc/node.socket)" \
     || { echo "error: cardano-node did not answer 'query tip'" >&2; exit 2; }
   NODE_BLOCK="$(jq -r '.block' <<<"$tip")"
   NODE_PROGRESS="$(jq -r '.syncProgress' <<<"$tip")"
@@ -115,7 +141,7 @@ fi
 echo
 # Integrity first: these are FAULTs (something is wrong), not "not there yet".
 check fault "0 db-sync not ahead of node" "gap=$GAP" [ "$AHEAD_PERSISTED" -eq 0 ]
-errors="$(dc logs --no-color --since "$LOG_WINDOW" cardano-db-sync 2>&1 | grep -ciE ':Error:|\bException\b' || true)"
+errors="$(svc_logs cardano-db-sync 2>&1 | grep -ciE ':Error:|\bException\b' || true)"
 check fault "5 no db-sync errors in last $LOG_WINDOW" "$errors error lines" [ "$errors" -eq 0 ]
 if (( advance > 0 )); then
   check fault "4 block_no advanced over ${advance}s" "$first_block@$first_ts -> $DB_BLOCK@$TS" [ "$DB_BLOCK" -gt "$first_block" ]

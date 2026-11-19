@@ -1,0 +1,106 @@
+# infra smoke test  run_utc=2026-11-19T15:55:24Z  host=com  midnight=auto
+# modules: /home/abc/projects/midnight-node-docker/infra/modules/{network,postgres,midnight-node}  docker provider 4.7.0
+# applying mn-smoke stack (postgres + midnight-node, created stopped)
+# Apply complete! Resources: 10 added, 0 changed, 0 destroyed.
+
+## Postgres (fresh volume, module infra/modules/postgres)
+PASS  P1  fresh volume initialised and ran 10-midnight-role.sh
+            2026-11-19 15:55:28.738 UTC [48] LOG:  database system is ready to accept connections
+            /usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-midnight-role.sh
+            2026-11-19 15:55:29.070 UTC [1] LOG:  database system is ready to accept connections
+PASS  P2  ssl=on, min TLSv1.2, scram-sha-256
+            on TLSv1.2 scram-sha-256 
+PASS  P3  pg_hba: midnight = hostssl scram, plain host reject
+            4|local|{all}|trust;6|hostssl|{midnight}|scram-sha-256;7|host|{midnight}|reject;9|host|{all}|scram-sha-256;
+PASS  P4  role midnight: login with a password, no admin rights, read-only default
+            f|f|f|t|f|default_transaction_read_only=on
+PASS  P5  files Postgres opens itself (TLS key, role password) readable as uid 999
+                  2 ok 
+PASS  P6  pgpass is 0600 and owned by uid 10001 as the node sees it
+            600 10001
+PASS  P7  TLS login as midnight (verify-full, password from pgpass)
+            midnight|t|TLSv1.3
+PASS  P8  non-TLS login as midnight rejected
+            psql: error: connection to server at "postgres" (172.20.0.2), port 5432 failed: FATAL:  pg_hba.conf rejects connection for host "172.20.0.3", user "midnight", database "cexplorer", no encryption
+PASS  P9  verify-full rejects a host name not in the certificate SAN
+            psql: error: connection to server at "172.20.0.2", port 5432 failed: server certificate for "postgres" (and 1 other name) does not match host name "172.20.0.2"
+PASS  P10 SELECT on a table db-sync creates later (default privileges)
+            42
+PASS  P11 writes refused: INSERT (read-only default), INSERT in READ WRITE txn (no grant), CREATE TABLE
+            ERROR:  cannot execute INSERT in a read-only transaction ERROR:  permission denied for table block ERROR:  cannot execute CREATE TABLE in a read-only transaction 
+
+## midnight-node index pre-creation (modules/midnight-db-indexes one-shot, files/midnight-indexes.sh)
+PASS  I0  without the db-sync schema the script refuses clearly
+            midnight-indexes: ERROR: db-sync tables missing: block, tx, tx_out, tx_in, multi_asset, ma_tx_out (run this after DB Sync is READY) exit=1 
+PASS  I1  phase-2 apply runs the one-shot: exit 0, 11 indexes created
+            apply=0 container_exit=0 created=11
+PASS  I2  11 indexes valid, definitions identical to midnight-node 2.1.101
+            idx_block_block_no valid=true CREATE INDEX idx_block_block_no ON public.block USING btree (block_no)
+            idx_ma_tx_out_id_ident valid=true CREATE INDEX idx_ma_tx_out_id_ident ON public.ma_tx_out USING btree (tx_out_id, ident)
+            idx_ma_tx_out_ident valid=true CREATE INDEX idx_ma_tx_out_ident ON public.ma_tx_out USING btree (ident)
+            idx_multi_asset_policy_name valid=true CREATE INDEX idx_multi_asset_policy_name ON public.multi_asset USING btree (policy, name)
+            idx_multi_asset_policy_name_hex valid=true CREATE INDEX idx_multi_asset_policy_name_hex ON public.multi_asset USING btree (encode((policy)::bytea, 'hex'::text), encode((name)::bytea, 'hex'::text))
+            idx_tx_block_id valid=true CREATE INDEX idx_tx_block_id ON public.tx USING btree (block_id)
+            idx_tx_in_tx_in_id valid=true CREATE INDEX idx_tx_in_tx_in_id ON public.tx_in USING btree (tx_in_id)
+            idx_tx_in_tx_out_id_tx_out_index valid=true CREATE INDEX idx_tx_in_tx_out_id_tx_out_index ON public.tx_in USING btree (tx_out_id, tx_out_index)
+            idx_tx_out_address valid=true CREATE INDEX idx_tx_out_address ON public.tx_out USING hash (address)
+            idx_tx_out_data_hash valid=true CREATE INDEX idx_tx_out_data_hash ON public.tx_out USING btree (data_hash)
+            idx_tx_out_tx_id valid=true CREATE INDEX idx_tx_out_tx_id ON public.tx_out USING btree (tx_id)
+PASS  I3  rerun is safe: nothing rebuilt, definitions unchanged
+            apply=0 unchanged=11 same_state=yes
+PASS  I4  INVALID leftover is dropped and rebuilt
+            apply=0 rebuilt=1 same_state=yes
+PASS  I5  conflicting definition fails the apply loudly (script + postcondition), then recovers
+            apply=1 postcondition=1 script=1 restored=yes
+            midnight-indexes: all 11 indexes present, valid and matching midnight-node 2.1.101
+PASS  I7  RUNBOOK socket-mode invocation (docker exec ... bash < script): 11 x nothing to do
+            unchanged=11 exit=0
+PASS  I6  role midnight still read-only: no CREATE on schema, no INSERT on tx_out, write refused
+            f|f ERROR:  cannot execute INSERT in a read-only transaction
+
+## Secret-ownership rules
+PASS  O1  operator-owned 0600 postgres_db/user/password: fresh init succeeds (read as root)
+            status=running exit=0 /usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-midnight-role.sh PostgreSQL init process complete; ready for start up. midnight role has no password: f 
+PASS  O2  unreadable midnight_db_password: init aborts with a clear error (no password-less role)
+            status=exited exit=1 /usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-midnight-role.sh 10-midnight-role.sh: ERROR: /run/secrets/midnight_db_password is not readable by postgres (uid 999); it must be owned by uid 999 (mode 0600) - see infra/README.md "Secrets" 10-midnight-role.sh: refusing to create role 'midnight' without a usable password; initialisation aborted. 
+PASS  O3  empty midnight_db_password: init aborts with a clear error
+            status=exited exit=1 /usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-midnight-role.sh 10-midnight-role.sh: ERROR: /run/secrets/midnight_db_password is empty 10-midnight-role.sh: refusing to create role 'midnight' without a usable password; initialisation aborted. 
+
+## midnight-node (module infra/modules/midnight-node, uid 10001)
+PASS  M1  volume-init fixed base-path ownership (10001, 0700)
+            exit=0 700 10001
+PASS  M2  node process runs as uid 10001
+            observed uids: 10001
+PASS  M3  RPC answers system_health
+            {"peers":0,"isSyncing":false,"shouldHavePeers":true}
+PASS  M4  node logs in to Postgres as midnight over TLS (server log)
+            connection authorized: user=midnight database=cexplorer SSL enabled (protocol=TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, bits=256)
+PASS  M5  node writes chain data owned by uid 10001
+            files=20 not_10001=0
+PASS  M6  node attempts no CREATE INDEX (all pre-created indexes found)
+            found_present=4 create_attempts=0 create_index_errors=0
+PASS  M7  node runs no DDL the read-only role cannot execute
+            ddl_errors=0
+FAIL  M8  node verifies the Postgres certificate (SSL mode VerifyFull)
+            Database connection SSL mode: Require | No ssl_root_cert configured: using PgSslMode::Require (encrypted but no certificate validation)
+# midnight-node log tail (container running exit=0 restarts=0):
+    2026-11-19 15:56:08 💻 CPU: Intel(R) Core(TM) i7-14700    
+    2026-11-19 15:56:08 💻 CPU cores: 8    
+    2026-11-19 15:56:08 💻 Memory: 32045MB    
+    2026-11-19 15:56:08 💻 Kernel: 7.0.0-43-generic    
+    2026-11-19 15:56:08 💻 Linux distribution: Amazon Linux 2023.12.20261026    
+    2026-11-19 15:56:08 💻 Virtual machine: yes    
+    2026-11-19 15:56:08 📦 Highest known block at #0    
+    2026-11-19 15:56:08 〽️ Prometheus exporter started at [::]:9615    
+    2026-11-19 15:56:08 Running JSON-RPC server: addr=0.0.0.0:9944,[::]:42137    
+    2026-11-19 15:56:08 🏁 CPU single core score: 1.09 GiBs, parallelism score: 892.71 MiBs with expected cores: 8    
+    2026-11-19 15:56:08 🏁 Memory score: 13.51 GiBs    
+    2026-11-19 15:56:08 🏁 Disk score (seq. writes): 1.98 GiBs    
+    2026-11-19 15:56:08 🏁 Disk score (rand. writes): 337.85 MiBs    
+    2026-11-19 15:56:08 MemoryMonitorService: memory monitoring disabled (threshold=0)    
+    2026-11-19 15:56:08 🥩 BEEFY gadget waiting for BEEFY pallet to become available...    
+
+==================== SUMMARY ====================
+PASS 29   FAIL 1   SKIP 0
+FAILED:   M8 node verifies the Postgres certificate (SSL mode VerifyFull)
+RESULT: FAIL

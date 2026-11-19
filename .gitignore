@@ -10,3 +10,11 @@ secrets/
 
 # Assessment brief: hiring-team material, not part of the submission
 DevOps Take Home Test V2.pdf
+
+# Terraform
+infra/**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+backend_override.tf
+crash.log

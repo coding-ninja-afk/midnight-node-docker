@@ -75,6 +75,48 @@ row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; echo postgres > "$
 out="$WORK/service_down.out"; PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$SCRIPTS/dbsync-status.sh" > "$out" 2>&1; rc=$?
 if [[ $rc == 2 ]] && grep -q "not running" "$out"; then echo "ok    dbsync/service_down  (exit 2)"; pass=$((pass+1)); else echo "FAIL  dbsync/service_down exit $rc"; cat "$out"; fail=$((fail+1)); fi
 
+# Terraform-built stack: must query the mn-<env>-* containers via docker exec, never compose,
+# and use the network's cardano-cli magic.
+tf_case() {  # $1=name $2=expected exit $3=RESULT prefix $4=must-appear-in-calls $5=must-not-appear $6...=args
+  local out="$WORK/$1.out" rc ok=1
+  PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" DBSYNC_RETRY_DELAY=0 \
+    "$SCRIPTS/dbsync-status.sh" "${@:6}" > "$out" 2>&1; rc=$?
+  expect "dbsync/$1" "$2" "$3" "$out" "$rc" ""
+  grep -qF -- "$4" "$D/calls" || ok=0
+  [[ -z "$5" ]] || ! grep -qF -- "$5" "$D/calls" || ok=0
+  local never=""; [[ -n "$5" ]] && never=", never \"$5\""
+  if (( ok )); then echo "ok    dbsync/$1/targets  (calls include \"$4\"$never)"; pass=$((pass+1))
+  else echo "FAIL  dbsync/$1/targets  calls were:"; sed 's/^/        /' "$D/calls"; fail=$((fail+1)); fi
+}
+
+newcase tf_preprod_ready
+{ row 1000 20; row 1003 15; } > "$D/db_rows"; { tip 1002 100.00; tip 1004 100.00; } > "$D/node_tips"
+tf_case tf_preprod_ready 0 "READY" "exec -i mn-preprod-postgres" "compose" --stack tf:mn-preprod --advance 1
+if grep -qF -- "exec -i mn-preprod-cardano-node cardano-cli query tip --testnet-magic 1" "$D/calls"; then
+  echo "ok    dbsync/tf_preprod_ready/magic  (--testnet-magic 1)"; pass=$((pass+1))
+else
+  echo "FAIL  dbsync/tf_preprod_ready/magic"; fail=$((fail+1))
+fi
+
+newcase tf_mainnet_magic
+row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"
+tf_case tf_mainnet_magic 4 "UNCONFIRMED" "query tip --mainnet" "--testnet-magic" --stack tf:mn-mainnet --network mainnet
+
+newcase tf_container_down
+row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; echo "-postgres" > "$D/down"
+out="$WORK/tf_container_down.out"; PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$SCRIPTS/dbsync-status.sh" --stack tf:mn-preprod > "$out" 2>&1; rc=$?
+if [[ $rc == 2 ]] && grep -q "container 'mn-preprod-postgres' is not running" "$out"; then echo "ok    dbsync/tf_container_down  (exit 2)"; pass=$((pass+1)); else echo "FAIL  dbsync/tf_container_down exit $rc"; cat "$out"; fail=$((fail+1)); fi
+
+newcase compose_default_unchanged     # default target is still the hand-built compose stack
+row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"
+tf_case compose_default_unchanged 4 "UNCONFIRMED" "compose -f compose-partner-chains.yml exec -T postgres" "mn-" 
+
+for bad in "--stack tf:" "--stack nope" "--network testnet"; do
+  # shellcheck disable=SC2086  # word splitting of $bad is intended
+  "$SCRIPTS/dbsync-status.sh" $bad >/dev/null 2>&1; rc=$?
+  if [[ $rc == 2 ]]; then echo "ok    dbsync/bad_args '$bad'  (exit 2)"; pass=$((pass+1)); else echo "FAIL  dbsync/bad_args '$bad' exit $rc"; fail=$((fail+1)); fi
+done
+
 # ---------- midnight-height-check.sh ----------
 port=18950
 declare -A MODES=(
