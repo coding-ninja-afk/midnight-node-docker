@@ -14,6 +14,7 @@ locals {
   config_mounts = {
     "pg_hba.conf"         = "/etc/postgresql/pg_hba.conf"
     "10-midnight-role.sh" = "/docker-entrypoint-initdb.d/10-midnight-role.sh"
+    "healthcheck.sh"      = "/usr/local/bin/mn-pg-healthcheck.sh"
   }
 
   command = concat(
@@ -90,11 +91,16 @@ resource "docker_container" "this" {
     }
   }
 
+  # Healthy = accepting connections AND the read-only role `midnight` exists with its password and
+  # grants (files/healthcheck.sh). A first init aborted by 10-midnight-role.sh leaves PGDATA
+  # populated; after a restart Postgres would run without the role and pg_isready alone would
+  # still say healthy (smoke test R1-R2).
   healthcheck {
-    test     = ["CMD-SHELL", "pg_isready -U \"$(cat /run/secrets/postgres_user)\" -d \"$(cat /run/secrets/postgres_db)\""]
-    interval = "10s"
-    timeout  = "5s"
-    retries  = 10
+    test         = ["CMD", "/bin/bash", "/usr/local/bin/mn-pg-healthcheck.sh"]
+    interval     = "10s"
+    timeout      = "5s"
+    retries      = 10
+    start_period = "30s"
   }
 
   wait                  = true

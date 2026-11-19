@@ -17,6 +17,8 @@ MUTATIONS=(
   "indexer no longer waits for midnight|main.tf|  depends_on = [module.midnight_node]=>|order"
   "midnight-node no longer waits for its indexes|main.tf|  depends_on = [module.cardano_db_sync, module.midnight_db_indexes]=>  depends_on = [module.cardano_db_sync]|order"
   "secret written into state via upload|modules/midnight-indexer/main.tf|  networks_advanced {\n    name = var.edge_network\n  }=>  networks_advanced {\n    name = var.edge_network\n  }\n  upload {\n    file    = \"/run/secrets/indexer/secret\"\n    content = \"deadbeef\"\n  }|test,checkov"
+  "node stops verifying the Postgres certificate|modules/midnight-node/main.tf|      \"SSL_ROOT_CERT=/run/secrets/midnight/postgres-ca.crt\",\n=>|test"
+  "postgres health back to pg_isready only|modules/postgres/main.tf|    test         = [\"CMD\", \"/bin/bash\", \"/usr/local/bin/mn-pg-healthcheck.sh\"]=>    test         = [\"CMD-SHELL\", \"pg_isready\"]|test"
   "image left unpinned|envs/$ENV.tfvars|midnightntwrk/midnight-node:2.1.101@sha256:0c1ad548d523c1109aa1f16daab1bf72dcb78c7e17b8a8c6d97424ad0eba7b8a=>midnightntwrk/midnight-node:latest|test"
 )
 

@@ -22,9 +22,13 @@
 #           builds the 11 indexes with the exact definitions, is safe to rerun, rebuilds an INVALID
 #           leftover, fails the apply on a conflicting definition; `midnight` stays read-only
 #   O1-O3   secret-ownership rules (see infra/README "Secrets"); unreadable / empty role password
-#   M1-M8   midnight-node: volume ownership fix, runs as uid 10001, RPC answers, connects to
+#   R1-R3   restart after a FAILED first init (role password missing / empty): Postgres comes back
+#           up without the role; the module's healthcheck must keep it unhealthy (control: valid)
+#   M1-M11  midnight-node: volume ownership fix, runs as uid 10001, RPC answers, connects to
 #           Postgres as `midnight` over TLS, writes chain data as uid 10001, attempts no CREATE
-#           INDEX, runs no other DDL the read-only role cannot execute, verifies the DB certificate
+#           INDEX, runs no other DDL the read-only role cannot execute, verifies the DB certificate;
+#           M9-M11 run a copy of the node container: control login, untrusted CA and host-name
+#           mismatch must both be rejected by the node itself
 set -uo pipefail
 
 INFRA="$(cd "$(dirname "$0")/.." && pwd)"
@@ -130,10 +134,19 @@ mkdir -p "$SECRETS/postgres/tls" "$SECRETS/midnight" "$WORK/ca" "$WORK/neg" "$WO
     -extfile "$WORK/ca/san.ext" -out "$SECRETS/postgres/tls/server.crt" 2>/dev/null
   cp "$WORK/ca/ca.crt" "$SECRETS/midnight/postgres-ca.crt"
 ) || { say "ERROR: generating scratch secrets failed"; exit 2; }
+# Negative-test material for M10/M11: a CA nobody trusts, and a pgpass entry for ANY host, so that
+# if the node skipped certificate/host-name checks the login would actually succeed (and be seen).
+mkdir -p "$SECRETS/midnight-neg"
+(
+  umask 077
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=postgres" -addext "subjectAltName=DNS:postgres" \
+    -keyout "$WORK/ca/rogue.key" -out "$SECRETS/midnight-neg/rogue-ca.crt" 2>/dev/null
+  printf '*:5432:cexplorer:midnight:%s\n' "$(cat "$SECRETS/postgres/midnight_db_password")" > "$SECRETS/midnight-neg/pgpass-any"
+) || { say "ERROR: generating negative-test material failed"; exit 2; }
 # Ownership per the host contract (infra/README "Secrets"), set as root in a throwaway container.
 docker run --rm --network none -v "$SECRETS:/s" "$PG_IMAGE" sh -c '
   chown -R 999:999 /s/postgres && chmod 755 /s/postgres /s/postgres/tls && chmod 600 /s/postgres/postgres_* /s/postgres/midnight_db_password /s/postgres/tls/server.key && chmod 644 /s/postgres/tls/server.crt &&
-  chown -R 10001:10001 /s/midnight && chmod 755 /s/midnight && chmod 600 /s/midnight/pgpass && chmod 644 /s/midnight/postgres-ca.crt' \
+  chown -R 10001:10001 /s/midnight /s/midnight-neg && chmod 755 /s/midnight /s/midnight-neg && chmod 600 /s/midnight/pgpass /s/midnight-neg/pgpass-any && chmod 644 /s/midnight/postgres-ca.crt /s/midnight-neg/rogue-ca.crt' \
   || { say "ERROR: could not set secret ownership"; exit 2; }
 
 # ---- smoke root module: the real modules, separate state --------------------------------------
@@ -385,6 +398,52 @@ check O3 "empty midnight_db_password: init aborts with a clear error" \
   'status=exited exit=[1-9].*10-midnight-role.sh: ERROR: .*midnight_db_password is empty' \
   "$(neg_pg "${PREFIX}-o3" | tr '\n' ' ')"
 
+# ---- R: restart after a failed first initialisation -----------------------------------------
+say ""; say "## Restart after a failed first init (module healthcheck, files/healthcheck.sh)"
+restart_pg() {  # $1=name $2=missing|empty|valid -> evidence line
+  local name="$1" mode="$2" pwmount=() st
+  docker run --rm --network none -v "$WORK/neg:/n" "$PG_IMAGE" sh -c '
+    printf "%s" "$(od -An -tx1 -N16 /dev/urandom | tr -d " \n")" > /n/midnight_db_password && chown 999:999 /n/midnight_db_password'
+  case "$mode" in
+    empty) docker run --rm --network none -v "$WORK/neg:/n" "$PG_IMAGE" sh -c ': > /n/midnight_db_password' ;;
+  esac
+  [[ "$mode" != missing ]] && pwmount=(-v "$WORK/neg/midnight_db_password:/run/secrets/midnight_db_password:ro")
+  docker run -d --name "$name" --network none --restart unless-stopped \
+    -e POSTGRES_DB_FILE=/run/secrets/postgres_db -e POSTGRES_USER_FILE=/run/secrets/postgres_user \
+    -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password -e MIDNIGHT_DB_PASSWORD_FILE=/run/secrets/midnight_db_password \
+    -v "$WORK/neg/postgres_db:/run/secrets/postgres_db:ro" -v "$WORK/neg/postgres_user:/run/secrets/postgres_user:ro" \
+    -v "$WORK/neg/postgres_password:/run/secrets/postgres_password:ro" "${pwmount[@]}" \
+    -v "$INFRA/modules/postgres/files/10-midnight-role.sh:/docker-entrypoint-initdb.d/10-midnight-role.sh:ro" \
+    -v "$INFRA/modules/postgres/files/healthcheck.sh:/usr/local/bin/mn-pg-healthcheck.sh:ro" \
+    --health-cmd "/bin/bash /usr/local/bin/mn-pg-healthcheck.sh" --health-interval 3s --health-timeout 5s \
+    --health-retries 3 --health-start-period 5s \
+    -v /var/lib/postgresql/data "$PG_IMAGE" >/dev/null || { echo "could-not-start"; return; }
+  # Failing modes: wait for the restart; then let the healthcheck settle. Control: wait for healthy.
+  for _ in $(seq 1 60); do
+    st="$(docker inspect -f '{{.State.Status}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
+    if [[ "$mode" == valid ]]; then [[ "$st" == "running 0 healthy" ]] && break
+    else [[ "$st" =~ ^running\ [1-9][0-9]*\ unhealthy$ ]] && break; fi
+    sleep 2
+  done
+  local logs; logs="$(docker logs "$name" 2>&1)"
+  echo "restarts=$(docker inspect -f '{{.RestartCount}}' "$name")" \
+       "init_aborted=$(grep -c '10-midnight-role.sh: ERROR' <<<"$logs")" \
+       "skipped_init_on_restart=$(grep -c 'Skipping initialization' <<<"$logs")" \
+       "pg_isready=$(docker exec "$name" pg_isready -q -U postgres >/dev/null 2>&1 && echo ok || echo fail)" \
+       "health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
+  echo "health output: $(docker inspect -f '{{json .State.Health}}' "$name" 2>/dev/null | jq -r '(.Log // [])[-1].Output // "none"' | tr -d '\n' | cut -c1-160)"
+  docker rm -fv "$name" >/dev/null 2>&1
+}
+check R1 "role password file MISSING: init aborts; after restart Postgres runs but stays unhealthy" \
+  '^restarts=[1-9][0-9]* init_aborted=[1-9][0-9]* skipped_init_on_restart=[1-9][0-9]* pg_isready=ok health=unhealthy health output: UNHEALTHY: role .midnight. does not exist' \
+  "$(restart_pg "${PREFIX}-r1" missing | tr '\n' ' ' | sed 's/ $//; s/ health output:/ health output:/')"
+check R2 "role password file EMPTY: init aborts; after restart Postgres runs but stays unhealthy" \
+  '^restarts=[1-9][0-9]* init_aborted=[1-9][0-9]* skipped_init_on_restart=[1-9][0-9]* pg_isready=ok health=unhealthy health output: UNHEALTHY: role .midnight. does not exist' \
+  "$(restart_pg "${PREFIX}-r2" empty | tr '\n' ' ' | sed 's/ $//')"
+check R3 "control: valid role password: initialises once and reports healthy" \
+  '^restarts=0 init_aborted=0 skipped_init_on_restart=0 pg_isready=ok health=healthy health output: ok: ' \
+  "$(restart_pg "${PREFIX}-r3" valid | tr '\n' ' ' | sed 's/ $//')"
+
 # ---- M: midnight-node as uid 10001 ------------------------------------------------------------
 say ""; say "## midnight-node (module infra/modules/midnight-node, uid 10001)"
 MN="${PREFIX}-midnight-node"; MNVOL="${PREFIX}-midnight-node-data"
@@ -394,7 +453,10 @@ if (( ! run_midnight )); then
            "M5|node writes chain data owned by uid 10001" \
            "M6|node attempts no CREATE INDEX (all pre-created indexes found)" \
            "M7|node runs no DDL the read-only role cannot execute" \
-           "M8|node verifies the Postgres certificate (SSL mode VerifyFull)"; do
+           "M8|node verifies the Postgres certificate (SSL mode VerifyFull)" \
+           "M9|control: copy of the node container with the correct CA and host logs in" \
+           "M10|node rejects a Postgres certificate from an untrusted CA" \
+           "M11|node rejects a host-name mismatch (connects by IP; certificate is for 'postgres')"; do
     record SKIP "${c%%|*}" "${c#*|}" "NOT VERIFIED: $skip_reason"
   done
 else
@@ -442,6 +504,44 @@ else
   # (env SSL_ROOT_CERT, node/src/cfg/midnight_cfg/mod.rs); without it: Require, no cert check.
   check M8 "node verifies the Postgres certificate (SSL mode VerifyFull)" '^Database connection SSL mode: VerifyFull' \
     "$(grep -m1 -oE 'Database connection SSL mode: [A-Za-z]+' <<<"$mlog" || echo 'no SSL mode line in the node log')$(grep -m1 -oE 'No ssl_root_cert configured[^.]*' <<<"$mlog" | sed 's/^/ | /')"
+  # M9-M11: copies of the module's node container (image, user, args, env from docker inspect), with
+  # only the TLS inputs changed. pgpass-any matches every host, so if the node did not verify the
+  # certificate / host name, the login WOULD succeed and show up in the Postgres log.
+  node_clone() {  # $1=name $2=SSL_ROOT_CERT (in-container path) $3=DB host -> evidence line
+    local name="$1" cert="$2" host="$3" envargs=() args=() mark cs logs st
+    while IFS= read -r e; do [[ -n "$e" ]] && envargs+=(-e "$e"); done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$MN" \
+      | grep -vE '^(SSL_ROOT_CERT|PGPASSFILE|DB_SYNC_POSTGRES_CONNECTION_STRING)=')
+    mapfile -t args < <(docker inspect -f '{{json .Config.Cmd}}' "$MN" | jq -r '.[]')
+    cs="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$MN" | sed -n 's/^DB_SYNC_POSTGRES_CONNECTION_STRING=//p' | sed "s/@postgres:5432/@${host}:5432/")"
+    mark=$(docker logs "$PG" 2>&1 | wc -l)
+    docker run -d --name "$name" --network "$NET" --user 10001:10001 "${envargs[@]}" \
+      -e "DB_SYNC_POSTGRES_CONNECTION_STRING=$cs" -e "SSL_ROOT_CERT=$cert" -e PGPASSFILE=/run/secrets/midnight/pgpass \
+      -v "$SECRETS/midnight-neg/pgpass-any:/run/secrets/midnight/pgpass:ro" \
+      -v "$SECRETS/midnight/postgres-ca.crt:/run/secrets/midnight/postgres-ca.crt:ro" \
+      -v "$SECRETS/midnight-neg/rogue-ca.crt:/run/secrets/midnight/rogue-ca.crt:ro" \
+      --tmpfs /node/chain:uid=10001,gid=10001,mode=0700 "$MN_IMAGE" "${args[@]}" >/dev/null || { echo "could-not-start"; return; }
+    for _ in $(seq 1 45); do   # until it logs in, or exits / logs a connection error
+      st="$(docker inspect -f '{{.State.Status}}' "$name")"
+      [[ "$st" == exited ]] && break
+      docker logs "$PG" 2>&1 | tail -n +$((mark + 1)) | grep -q 'connection authorized: user=midnight' && break
+      docker logs "$name" 2>&1 | grep -v 'SSL mode' | grep -qE '^error:|Could not connect to database' && break
+      sleep 2
+    done
+    logs="$(docker logs "$name" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+    echo "authorized=$(docker logs "$PG" 2>&1 | tail -n +$((mark + 1)) | grep -c 'connection authorized: user=midnight')" \
+         "$(grep -m1 -oE 'Database connection SSL mode: [A-Za-z]+' <<<"$logs" || echo 'no-ssl-mode-line')" \
+         "| $(grep -v 'Database connection SSL mode' <<<"$logs" | grep -m1 -E '^error:|Could not connect to database|[Ee]rror' | sed 's/^.*\(Could not connect\)/\1/' | cut -c1-260)"
+    docker rm -fv "$name" >/dev/null 2>&1
+  }
+  check M9 "control: copy of the node container with the correct CA and host logs in" \
+    '^authorized=[1-9][0-9]* Database connection SSL mode: VerifyFull' \
+    "$(node_clone "${PREFIX}-m9" /run/secrets/midnight/postgres-ca.crt postgres)"
+  check M10 "node rejects a Postgres certificate from an untrusted CA" \
+    '^authorized=0 Database connection SSL mode: VerifyFull \| .*([Cc]ertificate|UnknownIssuer|[Ii]ssuer|verify)' \
+    "$(node_clone "${PREFIX}-m10" /run/secrets/midnight/rogue-ca.crt postgres)"
+  check M11 "node rejects a host-name mismatch (connects by IP; certificate is for 'postgres')" \
+    '^authorized=0 Database connection SSL mode: VerifyFull \| .*([Cc]ertificate|NotValidForName|[Hh]ost ?name|name|verify)' \
+    "$(node_clone "${PREFIX}-m11" /run/secrets/midnight/postgres-ca.crt "$pg_ip")"
   say "# midnight-node log tail (container $state):"
   docker logs --tail 15 "$MN" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-200 | while IFS= read -r l; do say "    $l"; done
 fi

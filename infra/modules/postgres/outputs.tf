@@ -30,6 +30,7 @@ output "spec" {
     host_mounts = [for v in docker_container.this.volumes : { host_path = v.host_path, container_path = v.container_path, read_only = v.read_only } if v.host_path != null && v.host_path != ""]
     uploads     = length(docker_container.this.upload)
     command     = docker_container.this.command
+    healthcheck = flatten([for h in docker_container.this.healthcheck : h.test])
   }
 }
 

@@ -93,8 +93,16 @@ run "midnight_db_connection_is_tls_and_least_privilege" {
     error_message = "midnight-node must connect as the read-only 'midnight' role with sslmode=verify-full."
   }
   assert {
+    condition     = contains(output.container_specs.midnight_node.env, "SSL_ROOT_CERT=/run/secrets/midnight/postgres-ca.crt")
+    error_message = "midnight-node must set SSL_ROOT_CERT: without it the node uses PgSslMode::Require and does not verify the Postgres certificate or host name."
+  }
+  assert {
     condition     = contains(output.container_specs.postgres.command, "ssl=on")
     error_message = "Postgres must run with ssl=on."
+  }
+  assert {
+    condition     = contains(output.container_specs.postgres.healthcheck, "/usr/local/bin/mn-pg-healthcheck.sh")
+    error_message = "Postgres health must include the midnight-role check, not just pg_isready (a failed first init would otherwise restart as healthy)."
   }
   assert {
     condition     = output.container_specs.midnight_node.user == "10001:10001"

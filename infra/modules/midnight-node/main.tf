@@ -3,7 +3,8 @@ locals {
   base_path = "/node/chain"
 
   # Password-less URL: sqlx reads the password from PGPASSFILE (sqlx-postgres 0.8.6
-  # parse_from_url -> apply_pgpass). TLS with full verification against our CA.
+  # parse_from_url -> apply_pgpass). The sslmode/sslrootcert here are kept for other libpq-style
+  # clients; midnight-node itself takes TLS verification from SSL_ROOT_CERT (below).
   connection_string = "postgres://${var.postgres_role}@${var.postgres_host}:5432/${var.postgres_db}?sslmode=verify-full&sslrootcert=/run/secrets/midnight/postgres-ca.crt"
 
   key_env = var.validator_keys_enabled ? [
@@ -109,6 +110,10 @@ resource "docker_container" "this" {
       "CFG_PRESET=${var.cfg_preset}",
       "CARDANO_SECURITY_PARAMETER=${var.cardano_security_parameter}",
       "DB_SYNC_POSTGRES_CONNECTION_STRING=${local.connection_string}",
+      # The node ignores sslmode/sslrootcert in the URL and builds its own TLS options: only
+      # ssl_root_cert (env SSL_ROOT_CERT) turns on PgSslMode::VerifyFull, i.e. CA + hostname
+      # checks (node/src/main_chain_follower.rs, node-2.1.101). Without it: Require, no checks.
+      "SSL_ROOT_CERT=/run/secrets/midnight/postgres-ca.crt",
       "PGPASSFILE=/run/secrets/midnight/pgpass",
     ],
     local.key_env,

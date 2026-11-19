@@ -222,7 +222,15 @@ purpose: the point is to prove the pipeline is healthy, not just that the data i
 - **Point the node at the CA, or it won't verify the certificate.** midnight-node ignores
   `sslmode`/`sslrootcert` in `DB_SYNC_POSTGRES_CONNECTION_STRING` and uses its own `ssl_root_cert`
   setting (env `SSL_ROOT_CERT`). Without it the connection is encrypted but **unverified**
-  (`PgSslMode::Require`; smoke test M8). Set `SSL_ROOT_CERT` to the CA file to get `VerifyFull`.
+  (`PgSslMode::Require`). Set `SSL_ROOT_CERT` to the CA file. The Terraform module does this.
+  With it, the node logs `Database connection SSL mode: VerifyFull`, and refuses an untrusted CA
+  (`UnknownIssuer`) and a wrong host name (`certificate not valid for name …`) (smoke tests M8,
+  M10, M11). The certificate's SAN must contain the host in the connection string (`postgres`).
+- **Health must mean "the role exists".** If the first initialisation aborts (for example, the
+  role password file is missing), a restart skips initialisation and Postgres runs without the
+  role while `pg_isready` still succeeds. The Terraform module's healthcheck also checks the role,
+  so such a container stays unhealthy (smoke tests R1–R3). If you add the role to the compose
+  stack, give it the same healthcheck (`infra/modules/postgres/files/healthcheck.sh`).
 - **Keep RPC private.** The docs say RPC binds to localhost by default and recommend
   `--rpc-methods Safe` behind a reverse proxy. The upstream repo's `--rpc-external --rpc-cors all`
   `--prometheus-external` is the opposite, so don't copy it. Only P2P (30333) should be public.
@@ -357,5 +365,7 @@ git-ignored on purpose, so git will not save you here.
 | Disk headroom | 17 GB free vs about 20+ GB still needed | grow the disk before 100% (section 3) |
 | `docker compose down -v` | deletes all chain data | never use `-v` here |
 | Assumed: Postgres reads `*_FILE` as uid 999 (an earlier version of this runbook said to `chown 999`) | **wrong**: the entrypoint reads them as root, so a fresh volume initialises with operator-owned 0600 files | no chown needed (smoke test O1, 2026-11-19). Files Postgres opens *itself* later (a TLS key, the Terraform stack's `midnight_db_password`) do need uid 999: see `infra/README.md` "Secrets" |
-| midnight-node 2.1.101 creates indexes in the db-sync DB at startup | a read-only role makes it exit and restart-loop | pre-create the three indexes as the table owner (section 8.1) |
+| midnight-node 2.1.101 creates indexes in the db-sync DB at startup | a read-only role makes it exit and restart-loop | pre-create the 11 indexes as the table owner with `infra/modules/midnight-db-indexes/files/midnight-indexes.sh` (section 8.1) |
+| midnight-node ignores `sslmode=verify-full` in its connection string | encrypted, but certificate and host name not verified | set `SSL_ROOT_CERT` (section 8.1) |
+| A first Postgres init that aborts still leaves PGDATA initialised | after a restart Postgres runs without the `midnight` role, and `pg_isready` says healthy | role-aware healthcheck (section 8.1); fix the secret, remove the fresh volume, re-apply |
 | After a host reboot Docker starts all containers at once (Compose `depends_on` is not applied) | db-sync exits with "Connection refused" until Postgres is up, and recovers on its own (seen 2026-11-19 13:49 UTC: 2 restarts) | expected. `dbsync-status.sh` check 5 then reports FAULT for up to 15 min: rerun after that window before investigating |

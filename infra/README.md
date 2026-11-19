@@ -160,7 +160,9 @@ No secret value appears in Terraform config, variables, plan or state. Container
 paths**, mounted read-only. `upload {}` blocks are banned (their content is stored in state) by a
 test and by checkov `CKV2_MN_2`. Secret env vars are always `*_FILE` variants, which is also
 tested. midnight-node's DB URL has no password: sqlx (0.8.6, used by node 2.1.101) reads it from
-`PGPASSFILE`.
+`PGPASSFILE`. Certificate and host-name verification come from `SSL_ROOT_CERT` (the CA file).
+The node ignores `sslmode`/`sslrootcert` in the URL, and without `SSL_ROOT_CERT` it would encrypt
+without verifying (smoke tests M8, M10, M11).
 
 Host contract under `var.secrets_dir`. In production this is a tmpfs filled at boot by the
 secrets fetcher described in [`SECURITY.md`](../SECURITY.md):
@@ -223,9 +225,10 @@ never touch another stack.
 | P1–P11 | fresh init and role script; `ssl=on`/TLS 1.2+/SCRAM; `pg_hba` (midnight: TLS only); role has a password, no admin rights, read-only default; secret readability by uid 999 / 10001; TLS login as `midnight` with `verify-full` + pgpass; non-TLS refused; wrong host name refused; SELECT works on later tables; INSERT / CREATE refused |
 | I0–I6 | index pre-creation: refuses without the schema; 11 exact definitions; safe rerun; INVALID leftover rebuilt; conflicting definition fails the apply; role still read-only |
 | O1–O3 | the secret-ownership rules above; unreadable or empty role password aborts init |
-| M1–M8 | volume-init ownership fix; node runs as uid 10001; RPC answers; node logs in as `midnight` over TLS (server log); writes data as uid 10001; attempts no CREATE INDEX; runs no DDL; verifies the DB certificate |
+| R1–R3 | after an aborted first init plus a restart, Postgres runs without the role and must stay **unhealthy** (missing / empty password file); control: valid setup is healthy |
+| M1–M11 | volume-init ownership fix; node runs as uid 10001; RPC answers; logs in as `midnight` over TLS (server log); writes data as uid 10001; attempts no CREATE INDEX; runs no DDL; `VerifyFull`; a copy of the node is rejected for an untrusted CA and a host-name mismatch (with a control that logs in) |
 
-`--midnight auto` (the default) runs M1–M8 only if the Docker host has at least 4 GB free.
+`--midnight auto` (the default) runs M1–M11 only if the Docker host has at least 4 GB free.
 Otherwise **each one is reported as `SKIP … NOT VERIFIED: <reason>`**, the summary lists them,
 and the exit code is 4 (INCOMPLETE) instead of 0. CI runs `--midnight require`: too little disk
 is a setup error (exit 2), so a skip can never look like a pass there. Exit codes: 0 pass,
@@ -257,10 +260,19 @@ Repository settings this relies on (not in code):
 - Variables `TF_STATE_ROLE_ARN` / `TF_STATE_REGION` once the state bucket exists.
 - `TF_LIVE_TARGET=true` plus a self-hosted runner for real applies.
 
-**Workflow run:** not linked yet. The repo is public on GitHub
-(`coding-ninja-afk/midnight-node-docker`), but this workflow had not been pushed when this
-was written, so it has not run there. All of its steps were run locally with the same versions
-(results above). Replace this line with the run URL from the Actions tab after the first push.
+**Workflow runs:** first run on GitHub, for commit `6200f9a`:
+[run 44562587270](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44562587270),
+**failed**, for two reasons:
+- **The ordering check failed in all three `test` jobs.** `terraform graph` refuses to run after
+  `init -backend=false`, and the check had only worked locally because of a git-ignored
+  `backend_override.tf`. It now graphs its own throwaway copy with a local backend, and exits 2
+  on a failing or empty graph instead of evaluating nothing.
+- **The smoke test failed at that commit** because midnight-node did not yet verify the Postgres
+  certificate (M8). That is fixed now: `SSL_ROOT_CERT`, M8–M11.
+
+Both fixes were checked locally by replaying the `test` job on a clean copy (`init -backend=false`,
+no override, no provider cache) and by a full smoke run. The next push gives the first run that is
+expected to be green. Link it here.
 
 Because the repo is public, pull requests from forks get a read-only token and no OIDC: their
 plans still run and go to the artifact and job summary, but the PR-comment step is skipped.
@@ -298,29 +310,37 @@ Verified while building this (2026-11-19):
 - Configuration and tests: validate, plans, tests, lint and policies on 4.6.0 and 4.7.0.
 
 **Verified at runtime by the smoke test** (2026-11-19, `evidence/smoke-test-2026-11-19.txt`,
-28 PASS / 1 FAIL):
+36 PASS / 0 FAIL / 0 SKIP):
 - The Postgres module on a fresh volume: role script, `pg_hba`, `ssl=on`, and the read-only role's
   rights (which stay read-only after the index pre-creation).
 - **Role password file:** an unreadable or empty `midnight_db_password` aborts the
-  initialisation with a clear error (O2, O3). It used to create a password-less role silently.
-- **Index pre-creation** (phase-2 one-shot module `modules/midnight-db-indexes` (container
-  `mn-<env>-midnight-db-indexes`, script `files/midnight-indexes.sh`)):
+  initialisation with a clear error (O2, O3).
+- **Restart after a failed first init** (R1–R3):
+  - When the init script aborts, initdb has already filled PGDATA. On restart the image skips
+    initialisation and Postgres runs **without the `midnight` role**, and plain `pg_isready` says
+    it is fine.
+  - The module's healthcheck (`modules/postgres/files/healthcheck.sh`) also requires the role
+    with its password, read-only default and grants. So such a container stays **unhealthy**
+    (`UNHEALTHY: role 'midnight' does not exist`), and Terraform's `wait` fails the apply.
+  - A valid setup reports healthy.
+  - **Recovery:** fix the secret, then remove the data volume (nothing was synced into it yet)
+    and apply again.
+- **Index pre-creation** (phase-2 module `modules/midnight-db-indexes`, container
+  `mn-<env>-midnight-db-indexes`, script `files/midnight-indexes.sh`):
   - It refuses to run without the db-sync schema.
   - It builds all 11 indexes with definitions identical to node 2.1.101, verified against every
     `CREATE INDEX` in the tag by `scripts/verify-index-defs.sh` (also in CI).
   - A rerun is a no-op. An INVALID leftover is rebuilt. A conflicting definition fails the apply
-    through a postcondition (I0–I6).
-- **midnight-node:** it runs as uid 10001 (observed), logs in as `midnight` over TLS 1.3, finds its
-  indexes, attempts no `CREATE INDEX`, runs no other DDL, and answers RPC (M1–M7).
-
-**Open item found by the smoke test** (fix proposed, not applied):
-1. **M8, the node does not verify the Postgres certificate.** It ignores `sslmode=verify-full` and
-   `sslrootcert` in its connection string and uses its own `ssl_root_cert` setting (env
-   `SSL_ROOT_CERT`, confirmed by the node's config validation). Without it: `PgSslMode::Require`,
-   encrypted but no certificate or hostname check. Proposed fix: one env line in
-   `modules/midnight-node`,
-   `SSL_ROOT_CERT=/run/secrets/midnight/postgres-ca.crt`, plus a test assertion. The smoke test's
-   M8 then expects `Database connection SSL mode: VerifyFull`.
+    through a postcondition (I0–I7).
+- **midnight-node** (M1–M11):
+  - It runs as uid 10001, logs in as `midnight` over TLS 1.3, finds its indexes, attempts no
+    `CREATE INDEX`, runs no other DDL, and answers RPC.
+  - **It verifies the database certificate** (`SSL mode: VerifyFull`, via `SSL_ROOT_CERT`).
+  - A copy of the node container with only the TLS inputs changed is **rejected** for an
+    untrusted CA (`invalid peer certificate: UnknownIssuer`) and for a host-name mismatch
+    (`certificate not valid for name "172.19.0.2"; … only valid for DnsName("postgres")`).
+  - In both cases the password file matched any host, so only TLS verification stopped the login.
+    The same copy with the correct CA and host logs in (control, M9).
 
 **Caveat:** the node's genesis tools run `ALTER TABLE … SET (autovacuum…)`, which needs table
 ownership; the normal node run does not. `verify-index-defs.sh` lists that statement as a NOTE.
