@@ -6,7 +6,8 @@
 # Scenario directory $FAKE_DIR holds:
 #   db_rows     one "block|slot|epoch|time|lag" line per db-sync reading, consumed in order
 #   node_tips   one cardano-cli tip JSON per node reading, consumed in order
-#   logs        (optional) db-sync log text
+#   logs        (optional) db-sync log text; default: one ordinary Info line
+#   logs_fail   (optional) make `logs` fail like a daemon error, with this text
 #   down        (optional) service/container suffix to report as not running
 set -euo pipefail
 : "${FAKE_DIR:?FAKE_DIR not set}"
@@ -28,6 +29,9 @@ case "$args" in
   " inspect "*)    is_down "${*: -1}" && echo false || echo true ;;
   *" exec "*"postgres "*)     next_line db_rows ;;
   *" exec "*"cardano-node "*) next_line node_tips ;;
-  *" logs "*)      cat "$FAKE_DIR/logs" 2>/dev/null || true ;;
+  *" logs "*)
+    if [[ -f "$FAKE_DIR/logs_fail" ]]; then echo "Error response from daemon: $(cat "$FAKE_DIR/logs_fail")" >&2; exit 1; fi
+    if [[ -f "$FAKE_DIR/logs" ]]; then cat "$FAKE_DIR/logs"
+    else echo "[db-sync-node:Info:151] [2026-11-19 10:48:05.51 UTC] Insert Conway Block: epoch 164, slot 69600032, block 2650000"; fi ;;
   *) echo "fake docker: unhandled: $*" >&2; exit 99 ;;
 esac

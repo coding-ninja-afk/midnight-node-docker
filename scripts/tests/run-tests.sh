@@ -70,6 +70,16 @@ row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"
 echo '[db-sync-node:Error:151] runDbThread: Error SNErrDbSessionErr' > "$D/logs"
 dbsync_case errors_in_logs 1 "FAULT" "1 error lines"
 
+newcase logs_unreadable      # a failed log read must be an ERROR, never "0 errors"
+{ row 1000 20; row 1003 15; } > "$D/db_rows"; { tip 1002 100.00; tip 1004 100.00; } > "$D/node_tips"
+echo "No such container: midnight-preprod-cardano-db-sync-1" > "$D/logs_fail"
+out="$WORK/logs_unreadable.out"; PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" DBSYNC_RETRY_DELAY=0 "$SCRIPTS/dbsync-status.sh" --advance 1 > "$out" 2>&1; rc=$?
+if [[ $rc == 2 ]] && grep -q "could not read logs" "$out" && ! grep -q "^RESULT: READY" "$out"; then echo "ok    dbsync/logs_unreadable  (exit 2, not READY)"; pass=$((pass+1)); else echo "FAIL  dbsync/logs_unreadable exit $rc"; cat "$out"; fail=$((fail+1)); fi
+
+newcase logs_empty           # nothing to read in the window: cannot confirm "no errors"
+{ row 1000 20; row 1003 15; } > "$D/db_rows"; { tip 1002 100.00; tip 1004 100.00; } > "$D/node_tips"; : > "$D/logs"
+dbsync_case logs_empty 1 "FAULT" "0 error lines in 0 lines read" --advance 1
+
 newcase service_down
 row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; echo postgres > "$D/down"
 out="$WORK/service_down.out"; PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$SCRIPTS/dbsync-status.sh" > "$out" 2>&1; rc=$?

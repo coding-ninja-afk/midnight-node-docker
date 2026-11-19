@@ -1,0 +1,5 @@
+# Custom label of the self-hosted runner that can reach the live PreProd Docker daemon
+# (used by the plan-live and apply jobs in workflows/infra.yml). Register the runner with it.
+self-hosted-runner:
+  labels:
+    - midnight-preprod

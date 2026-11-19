@@ -141,8 +141,17 @@ fi
 echo
 # Integrity first: these are FAULTs (something is wrong), not "not there yet".
 check fault "0 db-sync not ahead of node" "gap=$GAP" [ "$AHEAD_PERSISTED" -eq 0 ]
-errors="$(svc_logs cardano-db-sync 2>&1 | grep -ciE ':Error:|\bException\b' || true)"
-check fault "5 no db-sync errors in last $LOG_WINDOW" "$errors error lines" [ "$errors" -eq 0 ]
+# Read the logs first and check the read itself: a failed read (daemon error, missing container)
+# or an empty window must never be scored as "0 errors".
+if ! dblogs="$(svc_logs cardano-db-sync 2>&1)"; then
+  echo "error: could not read logs of $(where cardano-db-sync): $(head -1 <<<"$dblogs")" >&2
+  exit 2
+fi
+log_lines="$(grep -c . <<<"$dblogs" || true)"
+errors="$(grep -ciE ':Error:|\bException\b' <<<"$dblogs" || true)"
+# Passes only if logs were actually read (db-sync logs continuously) AND none are errors.
+check fault "5 no db-sync errors in last $LOG_WINDOW" "$errors error lines in $log_lines lines read" \
+  test "$log_lines" -gt 0 -a "$errors" -eq 0
 if (( advance > 0 )); then
   check fault "4 block_no advanced over ${advance}s" "$first_block@$first_ts -> $DB_BLOCK@$TS" [ "$DB_BLOCK" -gt "$first_block" ]
 fi

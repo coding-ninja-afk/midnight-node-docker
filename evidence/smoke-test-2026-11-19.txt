@@ -1,13 +1,13 @@
-# infra smoke test  run_utc=2026-11-19T16:17:52Z  host=com  midnight=auto
+# infra smoke test  run_utc=2026-11-19T16:46:51Z  host=com  midnight=auto
 # modules: /home/abc/projects/midnight-node-docker/infra/modules/{network,postgres,midnight-node}  docker provider 4.7.0
 # applying mn-smoke stack (postgres + midnight-node, created stopped)
 # Apply complete! Resources: 10 added, 0 changed, 0 destroyed.
 
 ## Postgres (fresh volume, module infra/modules/postgres)
 PASS  P1  fresh volume initialised and ran 10-midnight-role.sh
-            2026-11-19 16:17:56.379 UTC [48] LOG:  database system is ready to accept connections
+            2026-11-19 16:46:55.492 UTC [48] LOG:  database system is ready to accept connections
             /usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-midnight-role.sh
-            2026-11-19 16:17:56.719 UTC [1] LOG:  database system is ready to accept connections
+            2026-11-19 16:46:55.801 UTC [1] LOG:  database system is ready to accept connections
 PASS  P2  ssl=on, min TLSv1.2, scram-sha-256
             on TLSv1.2 scram-sha-256 
 PASS  P3  pg_hba: midnight = hostssl scram, plain host reject
@@ -86,33 +86,33 @@ PASS  M4  node logs in to Postgres as midnight over TLS (server log)
 PASS  M5  node writes chain data owned by uid 10001
             files=20 not_10001=0
 PASS  M6  node attempts no CREATE INDEX (all pre-created indexes found)
-            found_present=4 create_attempts=0 create_index_errors=0
+            log_read=ok found_present=4 create_attempts=0 create_index_errors=0
 PASS  M7  node runs no DDL the read-only role cannot execute
-            ddl_errors=0
+            log_read=ok ddl_errors=0
 PASS  M8  node verifies the Postgres certificate (SSL mode VerifyFull)
             Database connection SSL mode: VerifyFull
 PASS  M9  control: copy of the node container with the correct CA and host logs in
             authorized=7 Database connection SSL mode: VerifyFull | 
 PASS  M10 node rejects a Postgres certificate from an untrusted CA
-            authorized=0 Database connection SSL mode: VerifyFull | Could not connect to database; error: error communicating with database: invalid peer certificate: UnknownIssuer    
+            authorized=0 Database connection SSL mode: VerifyFull | Could not connect to database; error: error communicating with database: invalid peer certificate: UnknownIssuer"))
 PASS  M11 node rejects a host-name mismatch (connects by IP; certificate is for 'postgres')
             authorized=0 Database connection SSL mode: VerifyFull | Could not connect to database; error: error communicating with database: invalid peer certificate: certificate not valid for name "172.19.0.2"; certificate is only valid for DnsName("postgres")    
 # midnight-node log tail (container running exit=0 restarts=0):
-    2026-11-19 16:19:11 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
-    2026-11-19 16:19:11 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
-    2026-11-19 16:19:11 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWLaf5nQzmrc6prZ5qVbf5xXyDywa5MfV9VcGch3W6KusK): "Databas
-    2026-11-19 16:19:11 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
-    2026-11-19 16:19:11 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
-    2026-11-19 16:19:11 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
-    2026-11-19 16:19:11 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWGBZQYYjCpbafVpvP53oPxNjtJE63CGaUdeNigmJyz49G): "Databas
-    2026-11-19 16:19:12 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
-    2026-11-19 16:19:12 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
-    2026-11-19 16:19:12 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
-    2026-11-19 16:19:12 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWQxxUgq7ndPfAaCFNbAxtcKYxrAzTxDfRGNktF75SxdX5): "Databas
-    2026-11-19 16:19:13 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
-    2026-11-19 16:19:13 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
-    2026-11-19 16:19:13 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
-    2026-11-19 16:19:13 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWQdnc6WdCdtKWUjbqh5JVXTDTPSoKgz1mfDmwVfojNu8c): "Databas
+    2026-11-19 16:48:10 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
+    2026-11-19 16:48:10 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
+    2026-11-19 16:48:10 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWT1VGFM1XSNg5Dq5ijaFe6Kha7fXGZpKQANFtsU5rrfWh): "Databas
+    2026-11-19 16:48:11 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
+    2026-11-19 16:48:11 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
+    2026-11-19 16:48:11 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
+    2026-11-19 16:48:11 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWLaf5nQzmrc6prZ5qVbf5xXyDywa5MfV9VcGch3W6KusK): "Databas
+    2026-11-19 16:48:12 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
+    2026-11-19 16:48:12 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
+    2026-11-19 16:48:12 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
+    2026-11-19 16:48:12 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWNrUBs22FfmgjqFMa9ZqKED2jnxwsXWw5E4q2XVwN35TJ): "Databas
+    2026-11-19 16:48:12 Get stable block by hash failed: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash does not exist", detail: No
+    2026-11-19 16:48:12 get_stable_block_for failed with Database("SqlxError(Database(PgDatabaseError { severity: Error, code: \"42703\", message: \"column block.hash does not exist\", detail: None, hint:
+    2026-11-19 16:48:12 Failed to create mc_hash inherent data for verification: Database query failed: SqlxError(Database(PgDatabaseError { severity: Error, code: "42703", message: "column block.hash doe
+    2026-11-19 16:48:12 💔 Verification failed for block 0xd64fcd69a4022baae4552501a5677417ccbd8e9d68a9671a9316fbb9355af01b received from (12D3KooWLMfECVArGLqktn2VQvopvTLV7ZY9yXGAgRcpntpPkht9): "Databas
 
 ==================== SUMMARY ====================
 PASS 36   FAIL 0   SKIP 0

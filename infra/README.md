@@ -211,6 +211,7 @@ plan-time values (`output.container_specs`).
 | `scripts/mutation-test.sh` | a deliberate mistake is **not** caught. It applies 7 (published Postgres port, password in URL, RPC on 0.0.0.0, ungated start, missing indexer dependency, secret via `upload`, unpinned image) |
 | checkov `CKV2_MN_1..3` + secrets scan | Postgres publishes ports, `upload` used, privileged container, secret-like strings |
 | `scripts/smoke-test.sh` (real containers, below) | the modules do not actually work: init, TLS, role rights, secret ownership, midnight-node start |
+| `scripts/assert-same-daemon.sh` (tested locally: same daemon, other daemon, other endpoint, no record, unreachable) | a live apply would use a plan made against a different Docker daemon |
 
 ### Smoke test (`scripts/smoke-test.sh`)
 
@@ -227,6 +228,10 @@ never touch another stack.
 | O1–O3 | the secret-ownership rules above; unreadable or empty role password aborts init |
 | R1–R3 | after an aborted first init plus a restart, Postgres runs without the role and must stay **unhealthy** (missing / empty password file); control: valid setup is healthy |
 | M1–M11 | volume-init ownership fix; node runs as uid 10001; RPC answers; logs in as `midnight` over TLS (server log); writes data as uid 10001; attempts no CREATE INDEX; runs no DDL; `VerifyFull`; a copy of the node is rejected for an untrusted CA and a host-name mismatch (with a control that logs in) |
+
+Checks that score the *absence* of a log line (M6, M7, and the `authorized=0` in M10/M11) only
+pass if the log was actually read: a failed or empty `docker logs` is reported as
+`LOG_READ_FAILED`, never as "nothing found".
 
 `--midnight auto` (the default) runs M1–M11 only if the Docker host has at least 4 GB free.
 Otherwise **each one is reported as `SKIP … NOT VERIFIED: <reason>`**, the summary lists them,
@@ -246,10 +251,20 @@ never fired. It now matches the literal network alias.
   - `scripts`: shellcheck plus the readiness-script tests.
   - `plan` (needs all three): one plan per env against the runner's Docker daemon, uploaded as an
     artifact, summarised in the job summary and posted as one PR comment per env, updated in place.
-- **Push to `main`**: the same jobs, then `apply` on the `preprod` **GitHub Environment**
-  (required reviewers). It applies the *reviewed* saved plan (Terraform refuses it if state
-  changed). With no live target (`vars.TF_LIVE_TARGET != 'true'`) it is a **dry run** that prints
-  the approved plan.
+- **Push to `main`**: the same jobs, plus the smoke test.
+  - **Live** (`vars.TF_LIVE_TARGET == 'true'`): `plan-live` runs on the self-hosted target runner
+    (labels `self-hosted`, `midnight-preprod`). It plans against the remote state **and the live
+    Docker daemon**, and records that daemon's unique ID next to the saved plan.
+  - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers), runs on the
+    same runner label. It first runs `scripts/assert-same-daemon.sh check`, which refuses to apply
+    if this job reached a different daemon or endpoint. Then it applies exactly that plan
+    (Terraform also refuses a saved plan if the state changed since).
+  - **No live target:** `apply` is a dry run that prints the PR-style plan. That plan was made on a
+    hosted runner's empty daemon, for review only, and is never applied.
+  - The Docker endpoint for every Terraform run is `vars.TF_DOCKER_HOST` (default: the runner's
+    socket), set once at the top of the workflow, so plan and apply cannot point at different
+    endpoints. The daemon-ID check covers the remaining case: the same endpoint string on two
+    different machines.
 - Credentials: OIDC only (`id-token: write` on plan/apply only). Defaults to `contents: read`.
   `pull-requests: write` only on plan. Every action is pinned to a commit SHA (verified against
   its tag with `git ls-remote`). Terraform, tflint and checkov versions are pinned. actionlint is clean.
@@ -258,21 +273,18 @@ Repository settings this relies on (not in code):
 - Environment `preprod` with required reviewers.
 - Branch protection on `main` requiring the `static`, `test`, `scripts` and `plan` checks.
 - Variables `TF_STATE_ROLE_ARN` / `TF_STATE_REGION` once the state bucket exists.
-- `TF_LIVE_TARGET=true` plus a self-hosted runner for real applies.
+- `TF_LIVE_TARGET=true`, a self-hosted runner with the label `midnight-preprod` that reaches the
+  target daemon (declared for actionlint in `.github/actionlint.yaml`), and optionally
+  `TF_DOCKER_HOST` for real applies.
 
-**Workflow runs:** first run on GitHub, for commit `6200f9a`:
-[run 44562587270](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44562587270),
-**failed**, for two reasons:
-- **The ordering check failed in all three `test` jobs.** `terraform graph` refuses to run after
-  `init -backend=false`, and the check had only worked locally because of a git-ignored
-  `backend_override.tf`. It now graphs its own throwaway copy with a local backend, and exits 2
-  on a failing or empty graph instead of evaluating nothing.
-- **The smoke test failed at that commit** because midnight-node did not yet verify the Postgres
-  certificate (M8). That is fixed now: `SSL_ROOT_CERT`, M8–M11.
-
-Both fixes were checked locally by replaying the `test` job on a clean copy (`init -backend=false`,
-no override, no provider cache) and by a full smoke run. The next push gives the first run that is
-expected to be green. Link it here.
+**Workflow runs:**
+- **Green:** [run 44566731108](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44566731108),
+  commit `0a8836c`. Every job passed: static checks, `terraform test` ×3, readiness scripts,
+  smoke test (36 checks, on GitHub's runner), plans ×3 and the dry-run apply.
+- **First run:** [run 44562587270](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44562587270),
+  commit `6200f9a`, failed. The ordering check could not run `terraform graph` after
+  `init -backend=false` (it had only worked locally because of a git-ignored backend override),
+  and the smoke test caught the then-missing certificate verification (M8). Both are fixed.
 
 Because the repo is public, pull requests from forks get a read-only token and no OIDC: their
 plans still run and go to the artifact and job summary, but the PR-comment step is skipped.

@@ -233,6 +233,20 @@ say "# $(grep -E '^Apply complete' <<<"$apply_log")"
 
 PG="${PREFIX}-postgres"; NET="${PREFIX}-internal"; PGIMG="$PG_IMAGE"
 asroot() { docker exec "$PG" psql -X -At -U postgres -d cexplorer -c "$1" 2>&1; }
+# Container logs, or a loud failure. Any check that scores the ABSENCE of a log line (0 errors,
+# 0 logins...) must use this: a failed or empty read prints LOG_READ_FAILED and returns 1, so it
+# can never be mistaken for "nothing found".
+logs_of() {  # $1=container -> logs (ANSI colours stripped) | LOG_READ_FAILED(...) + return 1
+  local out
+  if ! out="$(docker logs "$1" 2>&1)"; then echo "LOG_READ_FAILED($1): $(head -1 <<<"$out")"; return 1; fi
+  [[ -n "$out" ]] || { echo "LOG_READ_FAILED($1): empty log"; return 1; }
+  # shellcheck disable=SC2001  # a regex (ANSI colour codes), not a literal substitution
+  sed 's/\x1b\[[0-9;]*m//g' <<<"$out"
+}
+pg_lines_after() {  # $1=line mark -> Postgres log lines written after it | LOG_READ_FAILED + return 1
+  local all; all="$(logs_of "$PG")" || { echo "$all"; return 1; }
+  tail -n +$(($1 + 1)) <<<"$all"
+}
 client() {  # as uid 10001 with midnight-node's secret mounts
   docker run --rm --network "$NET" --user 10001:10001 -e PGPASSFILE=/run/secrets/midnight/pgpass -e PGCONNECT_TIMEOUT=5 \
     -v "$SECRETS/midnight/pgpass:/run/secrets/midnight/pgpass:ro" -v "$SECRETS/midnight/postgres-ca.crt:/run/secrets/midnight/postgres-ca.crt:ro" \
@@ -464,7 +478,8 @@ else
     "exit=$(docker inspect -f '{{.State.ExitCode}}' "${MN}-volume-init") $(docker run --rm --network none -v "$MNVOL:/v:ro" "$PG_IMAGE" stat -c '%a %u' /v)"
   # Only Postgres log lines written after this point count for M4 (the P-check clients also
   # log in as midnight over TLS, earlier).
-  pg_log_mark=$(docker logs "$PG" 2>&1 | wc -l)
+  pg_log=$(logs_of "$PG") || { record FAIL M0 "read the Postgres log before starting the node" "$pg_log"; exit 1; }
+  pg_log_mark=$(wc -l <<<"$pg_log")
   docker start "$MN" >/dev/null 2>&1
   rpc_ok="" uids="" deadline=$(( $(date +%s) + MIDNIGHT_WAIT ))
   while (( $(date +%s) < deadline )); do
@@ -492,14 +507,14 @@ else
   fi
   check M3 "RPC answers system_health" '"peers"' "${rpc_ok:-no answer within ${MIDNIGHT_WAIT}s; container $state}"
   check M4 "node logs in to Postgres as midnight over TLS (server log)" 'connection authorized: user=midnight database=cexplorer.*SSL enabled \(protocol=TLSv1\.[23]' \
-    "$(docker logs "$PG" 2>&1 | tail -n +$((pg_log_mark + 1)) | grep -E 'connection authorized: user=midnight' | tail -1 | sed 's/^.*LOG: *//')"
+    "$(pg_lines_after "$pg_log_mark" | grep -E 'connection authorized: user=midnight|LOG_READ_FAILED' | tail -1 | sed 's/^.*LOG: *//')"
   check M5 "node writes chain data owned by uid 10001" '^files=[1-9][0-9]* not_10001=0$' \
     "$(docker run --rm --network none -v "$MNVOL:/v:ro" "$PG_IMAGE" sh -c 'echo "files=$(find /v -mindepth 1 | wc -l) not_10001=$(find /v ! -user 10001 | wc -l)"')"
-  mlog="$(docker logs "$MN" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
-  check M6 "node attempts no CREATE INDEX (all pre-created indexes found)" '^found_present=[1-9][0-9]* create_attempts=0 create_index_errors=0$' \
-    "found_present=$(grep -oE "Index '?idx_[a-z_]+'? already exists" <<<"$mlog" | sort -u | wc -l) create_attempts=$(grep -cE "Creating index|Executing 'CREATE INDEX|Creating idx_" <<<"$mlog") create_index_errors=$(grep -c 'cannot execute CREATE INDEX' <<<"$mlog")"
-  check M7 "node runs no DDL the read-only role cannot execute" '^ddl_errors=0$' \
-    "ddl_errors=$(grep -cE 'cannot execute (ALTER|CREATE|DROP|TRUNCATE)[A-Z ]* in a read-only transaction' <<<"$mlog")$(grep -m1 -oE 'error: .*cannot execute [A-Z ]+ in a read-only transaction' <<<"$mlog" | sed 's/^/ first: /')"
+  if mlog="$(logs_of "$MN")"; then mlog_read=ok; else mlog_read="FAILED (${mlog})"; mlog=""; fi
+  check M6 "node attempts no CREATE INDEX (all pre-created indexes found)" '^log_read=ok found_present=[1-9][0-9]* create_attempts=0 create_index_errors=0$' \
+    "log_read=$mlog_read found_present=$(grep -oE "Index '?idx_[a-z_]+'? already exists" <<<"$mlog" | sort -u | wc -l) create_attempts=$(grep -cE "Creating index|Executing 'CREATE INDEX|Creating idx_" <<<"$mlog") create_index_errors=$(grep -c 'cannot execute CREATE INDEX' <<<"$mlog")"
+  check M7 "node runs no DDL the read-only role cannot execute" '^log_read=ok ddl_errors=0$' \
+    "log_read=$mlog_read ddl_errors=$(grep -cE 'cannot execute (ALTER|CREATE|DROP|TRUNCATE)[A-Z ]* in a read-only transaction' <<<"$mlog")$(grep -m1 -oE 'error: .*cannot execute [A-Z ]+ in a read-only transaction' <<<"$mlog" | sed 's/^/ first: /')"
   # The node ignores sslmode/sslrootcert in the URL and uses its own ssl_root_cert setting
   # (env SSL_ROOT_CERT, node/src/cfg/midnight_cfg/mod.rs); without it: Require, no cert check.
   check M8 "node verifies the Postgres certificate (SSL mode VerifyFull)" '^Database connection SSL mode: VerifyFull' \
@@ -508,12 +523,13 @@ else
   # only the TLS inputs changed. pgpass-any matches every host, so if the node did not verify the
   # certificate / host name, the login WOULD succeed and show up in the Postgres log.
   node_clone() {  # $1=name $2=SSL_ROOT_CERT (in-container path) $3=DB host -> evidence line
-    local name="$1" cert="$2" host="$3" envargs=() args=() mark cs logs st
+    local name="$1" cert="$2" host="$3" envargs=() args=() mark cs logs="" st
     while IFS= read -r e; do [[ -n "$e" ]] && envargs+=(-e "$e"); done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$MN" \
       | grep -vE '^(SSL_ROOT_CERT|PGPASSFILE|DB_SYNC_POSTGRES_CONNECTION_STRING)=')
     mapfile -t args < <(docker inspect -f '{{json .Config.Cmd}}' "$MN" | jq -r '.[]')
     cs="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$MN" | sed -n 's/^DB_SYNC_POSTGRES_CONNECTION_STRING=//p' | sed "s/@postgres:5432/@${host}:5432/")"
-    mark=$(docker logs "$PG" 2>&1 | wc -l)
+    local pgl; pgl="$(logs_of "$PG")" || { echo "authorized=unknown ($pgl)"; return; }
+    mark=$(wc -l <<<"$pgl")
     docker run -d --name "$name" --network "$NET" --user 10001:10001 "${envargs[@]}" \
       -e "DB_SYNC_POSTGRES_CONNECTION_STRING=$cs" -e "SSL_ROOT_CERT=$cert" -e PGPASSFILE=/run/secrets/midnight/pgpass \
       -v "$SECRETS/midnight-neg/pgpass-any:/run/secrets/midnight/pgpass:ro" \
@@ -527,8 +543,11 @@ else
       docker logs "$name" 2>&1 | grep -v 'SSL mode' | grep -qE '^error:|Could not connect to database' && break
       sleep 2
     done
-    logs="$(docker logs "$name" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
-    echo "authorized=$(docker logs "$PG" 2>&1 | tail -n +$((mark + 1)) | grep -c 'connection authorized: user=midnight')" \
+    logs="$(logs_of "$name")" || true   # on failure $logs holds the LOG_READ_FAILED line, which becomes the evidence
+    local after auth
+    if after="$(pg_lines_after "$mark")"; then auth="$(grep -c 'connection authorized: user=midnight' <<<"$after" || true)"
+    else auth="unknown ($after)"; fi
+    echo "authorized=$auth" \
          "$(grep -m1 -oE 'Database connection SSL mode: [A-Za-z]+' <<<"$logs" || echo 'no-ssl-mode-line')" \
          "| $(grep -v 'Database connection SSL mode' <<<"$logs" | grep -m1 -E '^error:|Could not connect to database|[Ee]rror' | sed 's/^.*\(Could not connect\)/\1/' | cut -c1-260)"
     docker rm -fv "$name" >/dev/null 2>&1

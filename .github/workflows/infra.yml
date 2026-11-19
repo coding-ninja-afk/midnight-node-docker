@@ -1,10 +1,15 @@
 # Terraform pipeline for infra/ (Section 5).
 #   pull_request -> static checks, terraform test (x3 envs), ordering + mutation checks,
-#                   readiness-script tests, then a plan per environment posted to the PR.
-#   push to main -> the same, then an apply job gated by the "preprod" GitHub Environment
-#                   (required reviewers). Without a live Docker target it is a dry run.
-# Credentials: OIDC only (no long-lived keys). State backend is used when vars.TF_STATE_ROLE_ARN
-# is set; otherwise a local backend override (the S3 backend is a stub until the bucket exists).
+#                   readiness-script tests, smoke test, then a plan per environment posted to the PR
+#                   (made on a hosted runner's empty Docker daemon: a review aid, never applied).
+#   push to main -> the same, then:
+#     live (vars.TF_LIVE_TARGET == 'true'): `plan-live` plans on the self-hosted target runner
+#       against the remote state AND the live Docker daemon, and records that daemon's ID; `apply`
+#       (gated by the "preprod" Environment) runs on the same runner label, checks it is talking to
+#       the SAME daemon (infra/scripts/assert-same-daemon.sh) and applies exactly that plan.
+#     otherwise: `apply` is a dry run that prints the hosted plan.
+# Credentials: OIDC only (no long-lived keys). The Docker endpoint comes from vars.TF_DOCKER_HOST
+# (default: the runner's local socket) and is the same for plan and apply.
 name: infra
 
 on:
@@ -28,6 +33,8 @@ env:
   CHECKOV_VERSION: "3.4.5"
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
+  # One Docker endpoint for every terraform run in this workflow (plan-live and apply must match).
+  TF_VAR_docker_host: ${{ vars.TF_DOCKER_HOST || 'unix:///var/run/docker.sock' }}
 
 defaults:
   run:
@@ -204,15 +211,15 @@ jobs:
             if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             else await github.rest.issues.createComment({ owner, repo, issue_number, body });
 
-  apply:
-    name: apply (preprod)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [plan, smoke]   # nothing is applied unless the smoke test passed on the same commit
-    # A live apply needs a runner that can reach the target Docker host (self-hosted).
-    runs-on: ${{ vars.TF_LIVE_TARGET == 'true' && 'self-hosted' || 'ubuntu-24.04' }}
-    environment: preprod   # required reviewers are configured on this Environment
+  plan-live:
+    name: plan (preprod, live target)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.TF_LIVE_TARGET == 'true'
+    needs: [static, test, scripts, smoke]
+    # The runner that can reach the live Docker daemon. apply uses the same labels, and
+    # assert-same-daemon.sh proves it reached the same daemon.
+    runs-on: [self-hosted, midnight-preprod]
     concurrency:
-      group: infra-apply-preprod
+      group: infra-live-preprod
       cancel-in-progress: false
     permissions:
       contents: read
@@ -223,35 +230,92 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
-      - name: Cloud credentials via OIDC (only when a state backend is configured)
-        if: vars.TF_STATE_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+      - name: require remote state for a live plan
+        env:
+          STATE_ROLE: ${{ vars.TF_STATE_ROLE_ARN }}
+        run: '[ -n "$STATE_ROLE" ] || { echo "::error::TF_LIVE_TARGET=true requires TF_STATE_ROLE_ARN (remote state)"; exit 1; }'
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.TF_STATE_ROLE_ARN }}
           aws-region: ${{ vars.TF_STATE_REGION }}
-      - name: fetch the reviewed plan
+      - name: plan against the live daemon and remote state
+        run: |
+          terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
+          scripts/assert-same-daemon.sh record plan-daemon.txt
+          terraform plan -var-file=envs/preprod.tfvars -out=tfplan -no-color | tee plan.log
+          terraform show -no-color tfplan > plan.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-live-preprod
+          path: |
+            infra/tfplan
+            infra/plan.txt
+            infra/plan-daemon.txt
+          retention-days: 7
+      - name: job summary
+        run: |
+          {
+            echo "### terraform plan: preprod (LIVE target, for approval)"
+            echo '```'; cat plan-daemon.txt; grep -E '^Plan:|^No changes' plan.log || true; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: apply (preprod)
+    # Live: only after plan-live succeeded. Dry run: plan-live is skipped.
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.plan.result == 'success' && needs.smoke.result == 'success' &&
+      (needs.plan-live.result == 'success' || (vars.TF_LIVE_TARGET != 'true' && needs.plan-live.result == 'skipped'))
+    needs: [plan, smoke, plan-live]   # nothing is applied unless the smoke test passed on the same commit
+    runs-on: ${{ vars.TF_LIVE_TARGET == 'true' && fromJSON('["self-hosted","midnight-preprod"]') || 'ubuntu-24.04' }}
+    environment: preprod   # required reviewers are configured on this Environment
+    concurrency:
+      group: infra-live-preprod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      # ---- live: apply exactly the plan made on this target ----
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: vars.TF_LIVE_TARGET == 'true'
+        with:
+          role-to-assume: ${{ vars.TF_STATE_ROLE_ARN }}
+          aws-region: ${{ vars.TF_STATE_REGION }}
+      - name: fetch the live plan
+        if: vars.TF_LIVE_TARGET == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: plan-live-preprod
+          path: infra
+      - name: apply on the same daemon the plan was made against
+        if: vars.TF_LIVE_TARGET == 'true'
+        run: |
+          terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
+          # Refuses (exit 1) if this job reached a different Docker daemon or endpoint.
+          scripts/assert-same-daemon.sh check plan-daemon.txt
+          # A saved plan also refuses to apply if the state changed since it was made.
+          terraform apply -auto-approve tfplan
+      # ---- dry run: show what the hosted review plan contains ----
+      - name: fetch the review plan
+        if: vars.TF_LIVE_TARGET != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: plan-preprod
           path: infra
-      - name: apply the reviewed plan, or dry-run
-        env:
-          LIVE: ${{ vars.TF_LIVE_TARGET }}
-          STATE_ROLE: ${{ vars.TF_STATE_ROLE_ARN }}
+      - name: dry run (no live target configured)
+        if: vars.TF_LIVE_TARGET != 'true'
         run: |
-          if [ "$LIVE" = "true" ]; then
-            # The reviewed plan must have been made against the real state backend.
-            [ -n "$STATE_ROLE" ] || { echo "::error::TF_LIVE_TARGET=true requires TF_STATE_ROLE_ARN (remote state)"; exit 1; }
-            terraform init -lockfile=readonly -backend-config=envs/preprod.s3.tfbackend
-            # A saved plan refuses to apply if state changed since it was made.
-            terraform apply -auto-approve tfplan
-          else
-            {
-              echo "### apply (preprod): DRY RUN"
-              echo "No live Docker target is configured for hosted runners (vars.TF_LIVE_TARGET != 'true')."
-              echo "This approved plan is what would be applied:"
-              echo '```'
-              grep -E '^Plan:|^No changes' plan.txt || head -40 plan.txt
-              echo '```'
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "### apply (preprod): DRY RUN"
+            echo "No live target configured (vars.TF_LIVE_TARGET != 'true'). This plan was made on a hosted"
+            echo "runner's empty Docker daemon for review only; it is never applied."
+            echo '```'
+            grep -E '^Plan:|^No changes' plan.txt || head -40 plan.txt
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

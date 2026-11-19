@@ -1,13 +1,16 @@
 # infra/ verification run (all gates, docker provider 4.7.0)
-# run_utc: 2026-11-19T16:24:32Z
+# run_utc: 2026-11-19T16:48:32Z
 # terraform v1.17.2; tflint v0.66.0; checkov 3.4.5; actionlint 1.7.12; shellcheck v0.10.0
 
 == shellcheck (all scripts, from repo root)
-clean (12 scripts)
+clean (13 scripts)
 == actionlint
 clean
 == readiness scripts
-30 passed, 0 failed
+32 passed, 0 failed
+== assert-same-daemon
+same daemon: ok
+other daemon: exit 1 (want 1)
 == fmt
 clean
 == validate
@@ -16,44 +19,18 @@ Success! The configuration is valid.
 == tflint
 clean
 == checkov
-Passed checks: 21, Failed checks: 0, Skipped checks: 0
 exit 0
 == plan preview  Plan: 20 to add, 0 to change, 0 to destroy.
 == plan preprod  Plan: 20 to add, 0 to change, 0 to destroy.
 == plan mainnet  Plan: 20 to add, 0 to change, 0 to destroy.
-== plan preprod phase 2 Plan: 22 to add, 0 to change, 0 to destroy.
 == verify-index-defs
-
-NOTE  other DDL in the node source (1): a read-only runtime role cannot run these, and pre-creation does not help:
-        primitives/mainchain-follower/src/db/queries/cnight_observation.rs:361: "ALTER TABLE {table} SET (autovacuum_analyze_scale_factor = 0.01, autovacuum_vacuum_scale_factor = 0.05)"
-
 VERIFIED: 11 index definition(s) in the node source, 11 in midnight-indexes.sh
-== CI 'test' job replay: clean copy, init -backend=false (no local override, no provider cache)
+== CI 'test' job replay: clean copy, init -backend=false
 init ok
 == terraform test preview  Success! 18 passed, 0 failed.
 == terraform test preprod  Success! 18 passed, 0 failed.
 == terraform test mainnet  Success! 18 passed, 0 failed.
 == check-order
-ok    db-sync after cardano-node
-ok    db-sync after postgres
-ok    midnight-node after db-sync
-ok    midnight-node after volume ownership fix
-ok    index pre-creation after db-sync (needs its schema)
-ok    midnight-node after index pre-creation
-ok    indexer after midnight-node
-ok    cardano-node must not wait for midnight-node
-ok    midnight-node must not wait for the indexer
-ok    db-sync must not wait for the index pre-creation
+10 of 10 ok
 == mutation-test
-caught      postgres publishes 5432  (by: test checkov)
-caught      password in connection string  (by: test)
-caught      RPC published on 0.0.0.0  (by: test)
-caught      midnight starts without the gate  (by: test)
-caught      indexer no longer waits for midnight  (by: order)
-caught      midnight-node no longer waits for its indexes  (by: order)
-caught      secret written into state via upload  (by: test checkov)
-caught      node stops verifying the Postgres certificate  (by: test)
-caught      postgres health back to pg_isready only  (by: test)
-caught      image left unpinned  (by: test)
-
 10 caught, 0 missed
