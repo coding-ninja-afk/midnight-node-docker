@@ -1,0 +1,29 @@
+# scripts/tests/run-tests.sh
+# run_utc: 2026-11-19T12:27:02Z
+# code: commit containing this file (base 358c4f4)
+# tools: GNU bash, version 5.2.21(1)-release; jq-1.7; curl 8.5.0; Python 3.12.3
+# note: the operator independently ran the earlier 17-case suite on 2026-11-19: 17 passed, 0 failed, exit 0.
+#       This file is the final run after review added 2 cases (ahead_of_highest, unwritable_output).
+
+ok    dbsync/ready  (exit 0, RESULT: READY - db-sync caught up and advancing; Midnight may start)
+ok    dbsync/catching_up  (exit 3, RESULT: CATCHING UP - node at 54.47%, db-sync 350 blocks behind node, newest block 740d 15h old, db-sync rate 6000 blocks/min)
+ok    dbsync/single_sample_at_tip  (exit 4, RESULT: UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving)
+ok    dbsync/transient_ahead  (exit 4, RESULT: UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving)
+ok    dbsync/persistent_ahead  (exit 1, RESULT: FAULT - failed check(s): 0 db-sync not ahead of node)
+ok    dbsync/persistent_ahead_gap_check  (negative gap not shown as PASS)
+ok    dbsync/persistent_ahead_while_syncing  (exit 1, RESULT: FAULT - failed check(s): 0 db-sync not ahead of node)
+ok    dbsync/stalled  (exit 1, RESULT: FAULT - failed check(s): 4 block_no advanced over 1s)
+ok    dbsync/errors_in_logs  (exit 1, RESULT: FAULT - failed check(s): 5 no db-sync errors in last 15m)
+ok    dbsync/service_down  (exit 2)
+ok    midnight/ready  (exit 0, RESULT: READY - at tip (1 behind highest 1011), not syncing, finalized 998 -> 1008)
+ok    midnight/ahead_of_highest  (exit 0, RESULT: READY - at tip (0 behind highest 1009), not syncing, finalized 998 -> 1008)
+ok    midnight/catching_up  (exit 3, RESULT: CATCHING UP - 97790 blocks behind highest 100010, isSyncing=true, ETA ~82 min at 1190 blocks/min net)
+ok    midnight/syncing_flag  (exit 3, RESULT: CATCHING UP - 1 blocks behind highest 1011, isSyncing=true)
+ok    midnight/unknown_highest  (exit 3, RESULT: CATCHING UP - network highest block unknown (no sync target from peers))
+ok    midnight/stalled  (exit 1, RESULT: FAULT - stalled, finality stuck)
+ok    midnight/falling_behind  (exit 1, RESULT: FAULT - falling behind)
+ok    midnight/finality_stuck  (exit 1, RESULT: FAULT - finality stuck)
+ok    midnight/unwritable_output  (exit 2)
+
+19 passed, 0 failed
+exit=0

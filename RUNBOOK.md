@@ -58,8 +58,9 @@ so start this part first and leave it running.
 |-----------------------------------|---------------------------------------------------------------|------------|
 | `compose-partner-chains.yml`      | cardano-node, postgres, cardano-db-sync                       | yes |
 | `scripts/init-secrets.sh`         | creates `secrets/postgres_{db,user,password}`, never overwrites | yes |
-| `scripts/dbsync-status.sh`        | node tip vs db-sync tip, PASS/FAIL on the section 7 checks    | yes |
-| `scripts/midnight-height-check.sh`| timestamped Midnight block-height samples (section 8)         | yes |
+| `scripts/dbsync-status.sh`        | db-sync vs node: READY / CATCHING UP / FAULT (section 7)      | yes |
+| `scripts/midnight-height-check.sh`| timestamped Midnight samples: READY / CATCHING UP / FAULT (section 8) | yes |
+| `scripts/tests/run-tests.sh`      | 19 scenario tests for both checks (fake docker, mock RPC), about 70 s | yes |
 | `secrets/`                        | DB credentials (mode 700/600)                                 | **no** (`.gitignore`) |
 | `evidence/`                       | captured sync output                                          | yes |
 
@@ -96,31 +97,48 @@ What you should see:
 ## 6. Monitoring sync progress
 
 ```bash
-scripts/dbsync-status.sh                  # one sample: checks 1-3 and 5
-scripts/dbsync-status.sh --advance 300    # two samples 5 min apart: adds check 4
+scripts/dbsync-status.sh                  # one sample: at best UNCONFIRMED
+scripts/dbsync-status.sh --advance 300    # two samples 5 min apart: can say READY
 watch -n 60 scripts/dbsync-status.sh      # live view
 ```
 
-Each sample line is UTC-timestamped and shows the node block and `syncProgress`, the db-sync
-block, slot, epoch and block time, `lag` (age of db-sync's newest block in seconds) and `gap`
-(node block minus db-sync block). Exit code: 0 caught up, 1 not yet, 2 cannot query.
+Each sample line is UTC-timestamped and shows the db-sync block, slot, epoch, block time and
+`lag` (age of its newest block, seconds), then the node block, `syncProgress` and `gap` (node
+block minus db-sync block). The last line is always one `RESULT:`.
 
-db-sync can never be ahead of the local cardano-node, so read the two together. While the node
-itself is syncing, db-sync keeps pace with it and the gap stays near zero. That is expected, not
-a stall. A gap of -1 to -3 is a sampling artifact: the node is queried a moment before db-sync.
+Both check scripts (this one and `scripts/midnight-height-check.sh`) use the same results:
+
+| Exit | RESULT | Meaning | What to do |
+|------|--------|---------|------------|
+| 0 | `READY` | caught up and still advancing | go to the next stage |
+| 1 | `FAULT` | something is wrong: stalled, db-sync ahead of the node, errors, falling behind | investigate. Waiting won't fix it |
+| 2 | (error) | could not query: service down, RPC unreachable | fix access, rerun |
+| 3 | `CATCHING UP` | healthy and moving, not at the tip yet (shows the rate) | wait |
+| 4 | `UNCONFIRMED` | at the tip on one sample (db-sync only) | rerun with `--advance 300` |
+
+**Negative gap (db-sync "ahead" of the node).** The script reads db-sync *first* and the node
+*second*. The node's block only grows, so a healthy reading always has gap ≥ 0. When a reading
+shows a negative gap, the script retries it (3 readings, 5 s apart). If it stays negative, that
+is a **FAULT**, even while the node is still syncing: db-sync holds blocks this node doesn't
+have. Likely causes are a node restarted on an older database, a deep rollback, or db-sync
+reading another node's socket.
+
+While the node itself is syncing, db-sync keeps pace with it and the gap stays near zero. That
+is reported as CATCHING UP, not a stall.
 
 ## 7. Before you start Midnight: how to confirm DB Sync has caught up
 
-Run `scripts/dbsync-status.sh --advance 300`. It must print `RESULT: caught up`, which means
-**all** of these hold:
+Run `scripts/dbsync-status.sh --advance 300`. It must print `RESULT: READY` (exit 0), which
+means **all** of these hold:
 
-| # | Check | Pass condition |
-|---|-------|----------------|
-| 1 | node `syncProgress` | `100.00` |
-| 2 | db-sync block vs node block | gap ≤ 5 blocks |
-| 3 | age of db-sync's newest block | under 300 s |
-| 4 | still advancing | `block_no` higher after 300 s |
-| 5 | logs | no `Error`/`Exception` lines from db-sync in the last 15 min |
+| # | Check | Pass condition | If it fails |
+|---|-------|----------------|-------------|
+| 0 | db-sync not ahead of node | gap ≥ 0 after up to 3 readings | FAULT |
+| 1 | node `syncProgress` | `100.00` | CATCHING UP |
+| 2 | db-sync block vs node block | 0 ≤ gap ≤ 5 blocks | CATCHING UP |
+| 3 | age of db-sync's newest block | under 300 s | CATCHING UP |
+| 4 | still advancing | `block_no` higher after 300 s | FAULT |
+| 5 | logs | no `Error`/`Exception` lines from db-sync in the last 15 min | FAULT |
 
 ### Why these thresholds
 
@@ -135,10 +153,16 @@ from that:
 - **Check 1 (`syncProgress = 100.00`) is needed but not enough.** It is rounded to 2
   decimals, and 0.005% of 4.5 years is about 2 hours. So the node can show 100.00 while
   still about 2 h behind. Check 3 closes that gap.
+- **Check 0 (never ahead) and the lower bound of check 2.** db-sync only learns blocks from
+  this node, so it can't legitimately be ahead. The earlier version of the script only checked
+  `gap <= 5` and read the node first, so a real problem (gap -32) passed as "fine". We retry
+  before calling it a FAULT, because a 1 to 2 block rollback on the node can briefly put it
+  behind what db-sync already wrote. Three readings 5 s apart is long enough for db-sync to
+  apply the same rollback.
 - **Check 2 (gap ≤ 5 blocks, about 100 s of chain).** At the tip, db-sync writes each block
-  within about a second of the node receiving it. 5 blocks leaves room for the two queries
-  running at slightly different moments, and for routine 1 to 2 block rollbacks (short forks
-  are normal on Cardano). A gap that stays above 5 means db-sync cannot keep up.
+  within about a second of the node receiving it. 5 blocks leaves room for a block arriving
+  between the two reads, and for routine 1 to 2 block rollbacks (short forks are normal on
+  Cardano). A gap that stays above 5 means db-sync cannot keep up.
 - **Check 3 (newest block < 300 s old).** With one block per 20 s on average, the chance
   of a real 300 s gap is about e^-15 ≈ 3×10⁻⁷. An older tip therefore points to a fault (node
   or db-sync behind, or stuck), not bad luck. Tighter limits such as 60 s would fail on normal
@@ -157,7 +181,7 @@ purpose: the point is to prove the pipeline is healthy, not just that the data i
 ## 8. Midnight node: prerequisites and verification
 
 > **Not yet deployed.** This section is written ahead of the deployment from the Midnight docs.
-> `scripts/midnight-height-check.sh` was tested against a mock RPC only.
+> `scripts/midnight-height-check.sh` was tested against a mock RPC only (`scripts/tests/run-tests.sh`).
 
 ### 8.1 Prerequisites (from the docs, each one a gotcha)
 
@@ -175,17 +199,21 @@ purpose: the point is to prove the pipeline is healthy, not just that the data i
 
 ### 8.2 Verification: block height must advance across timestamped checks
 
-A single "node is up" check proves nothing: a node can be up, peered and stuck. We verify by
-**sampling the block height at least 3 times, 60 s apart, with UTC timestamps**, and requiring
-progress between every pair of samples:
+A single "node is up" check proves nothing: a node can be up, peered and stuck. And "it is
+advancing" is not "it is ready": a node importing old blocks advances quickly while still days
+behind. We therefore **sample the block height at least 3 times, 60 s apart, with UTC
+timestamps**, and classify the node:
 
 ```bash
 # RPC is localhost-only, so run this on the node host (or through an SSH tunnel).
 scripts/midnight-height-check.sh -n 3 -i 60 -o "evidence/midnight-height-$(date -u +%F).txt"
 ```
 
-Each sample records `ts_utc best finalized highest peers is_syncing` from `chain_getHeader`,
-`chain_getFinalizedHead`, `system_syncState` and `system_health`. It passes when:
+Each sample records `ts_utc best finalized highest gap peers is_syncing` from
+`chain_getHeader`, `chain_getFinalizedHead`, `system_syncState` and `system_health`. `gap` is
+`highestBlock - best`, where `highestBlock` is the best block peers have announced.
+
+**Health checks.** Any failure is a FAULT (exit 1):
 
 | Check | Pass condition | Why |
 |---|---|---|
@@ -193,7 +221,19 @@ Each sample records `ts_utc best finalized highest peers is_syncing` from `chain
 | at least 3 samples | 2 intervals both advancing | One interval could be a burst right before a stall. Two in a row rules that out. |
 | finalized head advances | higher at the end than at the start | GRANDPA finality can trail the best block by a few blocks, so it isn't checked per interval. If it never moves, finality is stalled even though blocks are being produced. |
 | peers | ≥ 1 in every sample | No peers means any "progress" is only the node's own fork. |
-| at tip (reported) | `highest - best` ≤ 3 (about 18 s) | While syncing, the gap should shrink between runs instead. |
+| closing the gap | if more than 3 blocks behind, `gap` smaller at the end than at the start | A node that advances but slower than the network will never reach the tip. |
+
+**Readiness.** With no faults, the result is **READY (exit 0)** only if, in the last sample,
+`isSyncing` is `false` **and** `gap` ≤ 3 blocks (about 18 s). Otherwise it is **CATCHING UP
+(exit 3)**, with the reason and an ETA from how fast the gap closed:
+- far behind (`isSyncing=true`, large gap): normal during initial sync. Wait.
+- within 3 blocks but `isSyncing=true`: the node is settling at the tip. Rerun shortly.
+- `highestBlock` unknown: peers haven't given a sync target yet, so we can't claim it is at the tip.
+
+Both signals are required because neither is enough alone. `isSyncing` can read `false` before
+the node has learned the network's height, and a small gap means nothing if `highestBlock` is
+stale. Only READY clears the node for validator duties. CATCHING UP is evidence that sync is
+progressing, not that the node is ready.
 
 Why UTC timestamps: cardano-node, db-sync, postgres and midnight-node all log in UTC, while
 this host's local clock is UTC+2. Recording UTC (`date -u`) lets evidence samples line up

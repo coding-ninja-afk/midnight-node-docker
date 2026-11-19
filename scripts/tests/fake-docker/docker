@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake `docker` for testing scripts/dbsync-status.sh without a live stack.
+# Scenario directory $FAKE_DIR holds:
+#   db_rows     one "block|slot|epoch|time|lag" line per db-sync reading, consumed in order
+#   node_tips   one cardano-cli tip JSON per node reading, consumed in order
+#   logs        (optional) db-sync log text
+#   down        (optional) name of a service to report as not running
+set -euo pipefail
+: "${FAKE_DIR:?FAKE_DIR not set}"
+
+next_line() {  # $1=file: print the next unread line (last line repeats once exhausted)
+  local f="$FAKE_DIR/$1" n_file="$FAKE_DIR/.n_$1" n
+  n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$n_file"
+  local total; total=$(wc -l < "$f")
+  (( n > total )) && n=$total
+  sed -n "${n}p" "$f"
+}
+
+args=" $* "
+case "$args" in
+  *" ps "*)
+    svc="${*: -1}"
+    [[ -f "$FAKE_DIR/down" && "$(cat "$FAKE_DIR/down")" == "$svc" ]] || echo "fake-$svc-id" ;;
+  *" exec "*" postgres "*)     next_line db_rows ;;
+  *" exec "*" cardano-node "*) next_line node_tips ;;
+  *" logs "*)                  cat "$FAKE_DIR/logs" 2>/dev/null || true ;;
+  *) echo "fake docker: unhandled: $*" >&2; exit 99 ;;
+esac
