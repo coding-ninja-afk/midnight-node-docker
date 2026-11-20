@@ -279,8 +279,8 @@ never fired. It now matches the literal network alias.
     - the daemon's unique ID and endpoint
     - the `infra/` workdir (the modules' `abspath()` bakes the checkout path into the plan)
     - every bind-mount host path in the plan
-  - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers: see the
-    settings below; not yet configured), runs on the
+  - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers, `main`
+    only: see the settings below), runs on the
     same runner label. It first runs `assert-same-target.sh check`, which refuses to apply on any
     of these:
     - a different daemon or endpoint
@@ -302,16 +302,22 @@ never fired. It now matches the literal network alias.
   its tag with `git ls-remote`). Terraform, tflint and checkov versions are pinned. actionlint is clean.
 
 Repository settings this relies on (not in code). **Status on 2026-11-20:**
-- **Environment `preprod` with required reviewers: NOT configured yet.** The environment exists
-  with no protection rules, so the dry-run `apply` in
+- **Environment `preprod`: configured 2026-11-20** and checked through the GitHub API:
+  - **Required reviewers:** `coding-ninja-afk`, with self-review allowed. On a one-person repo,
+    "prevent self-review" would make every deployment impossible to approve.
+  - **Deployment branches:** `main` only (a custom branch policy).
+
+  Before this, the environment had no rules, and the dry-run `apply` in
   [run 44769819556](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556)
-  ran without waiting for approval. Until reviewers are added, the gate is in the workflow but not
-  enforced.
-- **Branch protection on `main`** requiring the `static`, `test`, `scripts` and `plan` checks:
-  **NOT configured yet.**
-- **The pull-request path has not run yet.** No PR has been opened, so the PR plan comment exists
-  in the workflow but is unproven. The plans themselves do run on every push, into the job summary
-  and artifacts.
+  ran without waiting for approval.
+- **Branch protection on `main`: not configured.** Requiring the infra checks would block every
+  pull request that doesn't touch `infra/**` or `scripts/**`. The workflow's path filter means
+  those checks never run there, so they would stay "Expected" forever. Enforcing them needs an
+  always-run summary job first. Until then, the checks run on every relevant PR and push but don't
+  block a merge.
+- **The pull-request path** (checks and one plan comment per environment) is exercised by the PR
+  that adds this text, `verify-pr-gate`. The merge's push to `main` then exercises the approval
+  gate on `apply`. Links to both are added once they have run.
 - Variables `TF_STATE_ROLE_ARN` / `TF_STATE_REGION` once the state bucket exists.
 - `TF_LIVE_TARGET=true`, a self-hosted runner with the label `midnight-preprod` that reaches the
   target daemon (declared for actionlint in `.github/actionlint.yaml`), and optionally
