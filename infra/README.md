@@ -269,9 +269,11 @@ never fired. It now matches the literal network alias.
   - `static`: fmt, validate, tflint, checkov.
   - `test`: `terraform test` for each env, the ordering check, and the mutation test on preprod.
   - `scripts`: shellcheck plus the readiness-script tests.
-  - `plan` (needs all three): one plan per env against the runner's Docker daemon, uploaded as an
-    artifact, summarised in the job summary and posted as one PR comment per env, updated in place.
-- **Push to `main`**: the same jobs, plus the smoke test.
+  - `smoke`: the Docker smoke test (after `static`).
+  - `plan` (needs `static`, `test` and `scripts`): one plan per env against the runner's Docker
+    daemon, uploaded as an artifact, summarised in the job summary and posted as one PR comment
+    per env, updated in place.
+- **Push to `main`**: the same jobs, then the following.
   - **Live** (`vars.TF_LIVE_TARGET == 'true'`): `plan-live` runs on the self-hosted target runner
     (labels `self-hosted`, `midnight-preprod`). It plans against the remote state **and the live
     Docker daemon**. Next to the saved plan it records the target with
@@ -315,9 +317,18 @@ Repository settings this relies on (not in code). **Status on 2026-11-20:**
   those checks never run there, so they would stay "Expected" forever. Enforcing them needs an
   always-run summary job first. Until then, the checks run on every relevant PR and push but don't
   block a merge.
-- **The pull-request path** (checks and one plan comment per environment) is exercised by the PR
-  that adds this text, `verify-pr-gate`. The merge's push to `main` then exercises the approval
-  gate on `apply`. Links to both are added once they have run.
+- **The pull-request path, verified** in [PR #1](https://github.com/coding-ninja-afk/midnight-node-docker/pull/1),
+  [run 44788338567](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44788338567):
+  - Every check passed: static, `terraform test` ×3, readiness scripts, smoke test, plan ×3.
+  - `apply` was skipped, as it should be on a PR.
+  - The bot posted **one plan comment per environment** (`preview`, `preprod`, `mainnet`), each
+    "Plan: 20 to add, 0 to change, 0 to destroy".
+- **The approval gate, verified** on the merge's push to `main`,
+  [run 44789040258](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44789040258):
+  - The `preprod` deployment was created at 18:07:15 UTC, and `apply (preprod)` waited for review.
+  - `coding-ninja-afk` approved it ("Reviewed checks and Terraform plan. Approving dry run.").
+  - It ran 18:11:34 to 18:11:53 and passed. It was a dry run (no live target), so nothing was
+    applied.
 - Variables `TF_STATE_ROLE_ARN` / `TF_STATE_REGION` once the state bucket exists.
 - `TF_LIVE_TARGET=true`, a self-hosted runner with the label `midnight-preprod` that reaches the
   target daemon (declared for actionlint in `.github/actionlint.yaml`), and optionally
@@ -325,10 +336,12 @@ Repository settings this relies on (not in code). **Status on 2026-11-20:**
 
 **Workflow runs:**
 - **Latest green at the time of writing:**
-  [run 44769819556](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556),
-  commit `4287a84`. Every job passed: static checks, `terraform test` ×3, readiness scripts,
-  smoke test, plans ×3 and the dry-run apply. `plan (preprod, live target)` is skipped because
-  `TF_LIVE_TARGET` is not set.
+  [run 44789040258](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44789040258),
+  commit `54d6b91` (the merge of PR #1). Every job passed: static checks, `terraform test` ×3,
+  readiness scripts, smoke test, plans ×3, and the dry-run apply **after approval**.
+  `plan (preprod, live target)` is skipped because `TF_LIVE_TARGET` is not set.
+- **Pull request:** [PR #1](https://github.com/coding-ninja-afk/midnight-node-docker/pull/1), [run 44788338567](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44788338567), with
+  the three plan comments.
 - **First fully green run:**
   [run 44566731108](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44566731108),
   commit `0a8836c`, including the smoke test (36 checks, on GitHub's runner).

@@ -18,7 +18,7 @@ host for Midnight's ~110 GiB initial sync.
 | 2. Monitoring and alerting | [`monitoring/`](monitoring/), summary below | Running against the live Cardano stack. **Midnight is not scraped while paused**, so no Midnight alert can fire. Alerts go to a placeholder webhook |
 | 3. Automation (option C: node health checker) | [`scripts/health-check.sh`](scripts/health-check.sh), usage below | Polling, JSON reports, comparison with the previous report; 53 scenario tests. db-sync check run live; Midnight check tested against a mock RPC only |
 | 4. Security and key management | [`SECURITY.md`](SECURITY.md) | Written |
-| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI. Latest green runs at the time of writing, on `4287a84`: [infra](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556), [monitoring](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769817483) |
+| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI. [PR #1](https://github.com/coding-ninja-afk/midnight-node-docker/pull/1): all checks green, with one plan comment per environment ([run](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44788338567)). Merge to `main`: `apply` waited for the `preprod` approval, then the dry run passed ([run 44789040258](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44789040258)). Monitoring CI: [run 44786062524](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44786062524) |
 
 ## Section 1: status of the Midnight node
 
