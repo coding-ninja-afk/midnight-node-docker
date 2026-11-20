@@ -271,7 +271,10 @@ failed on file permissions and made every mutation look "caught".
 - The rules load (24 rules + params).
 - After an unattended host reboot (12:17 UTC), everything came back on its own, including the
   sidecar, and caught up without paging.
-- Grafana serves the provisioned dashboard; the default `admin/admin` login is refused.
+- Grafana opens on the provisioned dashboard; the default `admin/admin` login is refused (HTTP
+  401). Every panel was queried through Grafana at 17:30 UTC: 13 of 17 had live data, and the 4
+  Midnight panels were empty because the node is paused. The alert panels showed the firing
+  `DiskWillFillWithin24h` (`evidence/grafana-home-2026-11-20.txt`).
 - A stopped sidecar fires `MonitoringTargetDown` and clears after restart
   (`evidence/monitoring-live-scrape-failure-2026-11-20.txt`).
 - The inhibitions work (`evidence/monitoring-inhibition-2026-11-20.txt`).
@@ -303,7 +306,8 @@ it runs unmonitored and nothing says so. When resuming (RUNBOOK section 8.3, ste
 
 ## Dashboard
 
-`grafana/dashboards/midnight-fno.json`, provisioned read-only:
+`grafana/dashboards/midnight-fno.json`, provisioned read-only, and Grafana's **home page**
+(`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` in `compose.yml`):
 - **Status tiles** that turn red at the alert thresholds: Cardano and db-sync tip age, db-sync gap,
   Midnight best block and blocks per 5 min, disk free, targets up, alerts firing.
 - **Trends behind each alert:** tip age, slot rate, db-sync gap and queue, Cardano peers, Midnight
@@ -311,6 +315,10 @@ it runs unmonitored and nothing says so. When resuming (RUNBOOK section 8.3, ste
 - **A firing and pending alerts table.**
 
 Midnight panels show NO DATA until a Midnight target is added.
+
+Read alerts from this dashboard's alert panels or from Alertmanager (http://127.0.0.1:9093).
+**Not** from Grafana's built-in "Firing alerts" widget: it only lists Grafana-managed rules, so it
+says "All clear" even while Prometheus has an alert firing.
 
 ## Not done yet
 

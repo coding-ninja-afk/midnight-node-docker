@@ -1,0 +1,42 @@
+# Grafana after setting the provisioned dashboard as home (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH)
+# 2026-11-20T17:30:18Z. Only the grafana container was recreated (docker compose up -d --no-deps grafana).
+# API calls were made inside the grafana container; the admin password was never printed.
+# Midnight is paused (containers stopped, Prometheus target empty), so its 4 panels have no data.
+
+== default login refused
+admin/admin -> HTTP 401
+
+== home
+{"redirectUri":"/d/default-home-dashboard/midnight-fno-preprod"}
+home dashboard: Midnight FNO - PreProd, 17 panels
+
+== every panel queried through Grafana's Prometheus datasource, last 1 h (series with data / data points)
+stat        Cardano tip age                  series=1  points=1
+stat        db-sync tip age                  series=1  points=1
+stat        db-sync gap                      series=1  points=1
+stat        Midnight best block              series=0  points=0
+stat        Midnight blocks / 5 min          series=0  points=0
+stat        Disk free                        series=1  points=1
+stat        Targets up                       series=1  points=1
+stat        Alerts firing                    series=1  points=1
+timeseries  Tip age: node and db-sync        series=2  points=122
+timeseries  Slot rate (slots/s over 10 min)  series=2  points=122
+timeseries  db-sync gap and queue            series=2  points=122
+timeseries  cardano-node peers               series=3  points=183
+timeseries  Block heights                    series=0  points=0
+timeseries  Import results and peers         series=0  points=0
+timeseries  Chain-data disk                  series=2  points=122
+timeseries  Scrape health (1 = up)           series=5  points=305
+table       Firing and pending alerts        series=1  points=1
+
+== alert panels and key stats (instant values)
+Alerts firing: [{"labels":{},"value":1}]
+Firing and pending alerts: [{"labels":{"alertname":"DiskWillFillWithin24h","alertstate":"firing","severity":"warning","mountpoint":"/"},"value":1}]
+Disk free: [{"labels":{},"value":0.2007799485867176}]
+Cardano tip age: [{"labels":{},"value":26.7739999294281}]
+db-sync tip age: [{"labels":{},"value":26.7739999294281}]
+
+== Prometheus alert state
+{"alertname":"DiskWillFillWithin24h","state":"firing","pending_since":"2026-11-20T15:17:59.774528088Z"}
+== Alertmanager
+{"alertname":"DiskWillFillWithin24h","firing_since":"2026-11-20T15:47:59.774Z","receiver":"placeholder-webhook"}

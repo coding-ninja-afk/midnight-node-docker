@@ -193,7 +193,7 @@ secrets fetcher described in [`SECURITY.md`](../SECURITY.md):
 | `postgres/tls/server.crt`, `server.key` | 999 | 0644 / 0600 | postgres (`ssl=on`). SAN must include `postgres` |
 | `midnight/pgpass` (`postgres:5432:cexplorer:midnight:<pw>`) | 10001 | 0600 | midnight-node (sqlx ignores group/world-readable pgpass) |
 | `midnight/postgres-ca.crt` | 10001 | 0644 | midnight-node (`sslmode=verify-full`) |
-| `midnight/keys/{aura,grandpa,cross_chain}.seed`, `node.key` | 10001 | 0400 | only when `validator_keys_enabled` |
+| `midnight/keys/{aura,grandpa,cross_chain}.seed`, `node.key` | 10001 | 0400 | only when `validator_keys_enabled`. **Caveat:** the node copies each seed, in plaintext, into its keystore, which is on the chain-data volume. The module sets no `--keystore-path` yet (tested on 2.1.101, SECURITY.md section 4) |
 | `indexer/secret` (hex, 32 bytes) | 10001 | 0400 | indexer (`APP__INFRA__SECRET_FILE`) |
 | `indexer/blockfrost_id` | 10001 | 0400 | indexer (a placeholder is fine if SPO stake data is not needed) |
 
@@ -205,7 +205,8 @@ Why owners matter, as measured by `scripts/smoke-test.sh` on 2026-11-19:
 - **Files Postgres opens itself, as uid 999:** `tls/server.key` (Postgres also insists on owner
   999 and 0600) and `midnight_db_password`, which our init script reads as uid 999. If that file
   is unreadable, the init **still completes**: `cat` fails, psql carries on, and the `midnight`
-  role is created with **no password** (check O2, currently FAIL: open item 1 below).
+  role is created with **no password**. This was fixed: the init script now aborts on an
+  unreadable or empty file (smoke checks O2 and O3 PASS, `evidence/smoke-test-2026-11-19.txt`).
 
 State still contains the plan-time configuration: names, image digests, ports, file **paths**.
 It is still sensitive for an attacker mapping the host, so the S3 backend is encrypted,
@@ -278,7 +279,8 @@ never fired. It now matches the literal network alias.
     - the daemon's unique ID and endpoint
     - the `infra/` workdir (the modules' `abspath()` bakes the checkout path into the plan)
     - every bind-mount host path in the plan
-  - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers), runs on the
+  - Then `apply`, behind the `preprod` **GitHub Environment** (required reviewers: see the
+    settings below; not yet configured), runs on the
     same runner label. It first runs `assert-same-target.sh check`, which refuses to apply on any
     of these:
     - a different daemon or endpoint
@@ -299,18 +301,31 @@ never fired. It now matches the literal network alias.
   `pull-requests: write` only on plan. Every action is pinned to a commit SHA (verified against
   its tag with `git ls-remote`). Terraform, tflint and checkov versions are pinned. actionlint is clean.
 
-Repository settings this relies on (not in code):
-- Environment `preprod` with required reviewers.
-- Branch protection on `main` requiring the `static`, `test`, `scripts` and `plan` checks.
+Repository settings this relies on (not in code). **Status on 2026-11-20:**
+- **Environment `preprod` with required reviewers: NOT configured yet.** The environment exists
+  with no protection rules, so the dry-run `apply` in
+  [run 44769819556](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556)
+  ran without waiting for approval. Until reviewers are added, the gate is in the workflow but not
+  enforced.
+- **Branch protection on `main`** requiring the `static`, `test`, `scripts` and `plan` checks:
+  **NOT configured yet.**
+- **The pull-request path has not run yet.** No PR has been opened, so the PR plan comment exists
+  in the workflow but is unproven. The plans themselves do run on every push, into the job summary
+  and artifacts.
 - Variables `TF_STATE_ROLE_ARN` / `TF_STATE_REGION` once the state bucket exists.
 - `TF_LIVE_TARGET=true`, a self-hosted runner with the label `midnight-preprod` that reaches the
   target daemon (declared for actionlint in `.github/actionlint.yaml`), and optionally
   `TF_DOCKER_HOST` for real applies.
 
 **Workflow runs:**
-- **Green:** [run 44566731108](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44566731108),
-  commit `0a8836c`. Every job passed: static checks, `terraform test` ×3, readiness scripts,
-  smoke test (36 checks, on GitHub's runner), plans ×3 and the dry-run apply.
+- **Latest green at the time of writing:**
+  [run 44769819556](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556),
+  commit `4287a84`. Every job passed: static checks, `terraform test` ×3, readiness scripts,
+  smoke test, plans ×3 and the dry-run apply. `plan (preprod, live target)` is skipped because
+  `TF_LIVE_TARGET` is not set.
+- **First fully green run:**
+  [run 44566731108](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44566731108),
+  commit `0a8836c`, including the smoke test (36 checks, on GitHub's runner).
 - **First run:** [run 44562587270](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44562587270),
   commit `6200f9a`, failed. The ordering check could not run `terraform graph` after
   `init -backend=false` (it had only worked locally because of a git-ignored backend override),
@@ -406,5 +421,8 @@ ownership; the normal node run does not. `verify-index-defs.sh` lists that state
   a cloud-init step.
 - **Secrets fetcher**: the KMS + secrets-manager → tmpfs flow from SECURITY.md produces the host
   contract above.
+- **Keystore on tmpfs**: add `--keystore-path` on a tmpfs mount to `modules/midnight-node` before
+  enabling `validator_keys_enabled`. Otherwise the seeds end up on the chain-data volume and in its
+  snapshots.
 - **Real state backend**: create the bucket (versioning, SSE-KMS, TLS-only policy) and an OIDC
   role scoped to `midnight/<env>/*`.

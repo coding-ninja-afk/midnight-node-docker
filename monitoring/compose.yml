@@ -54,6 +54,9 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Open on the provisioned FNO dashboard instead of Grafana's generic welcome page (whose
+      # "Firing alerts" widget only lists Grafana-managed rules; ours live in Prometheus).
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/midnight-fno.json
     secrets: [grafana_admin_password]
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

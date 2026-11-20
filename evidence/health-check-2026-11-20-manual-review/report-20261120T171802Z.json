@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-20T17:18:02Z",
+  "generated_epoch": 1795195082,
+  "cycle": 1,
+  "interval_s": 130,
+  "targets": {
+    "dbsync": {
+      "stack": "compose",
+      "network": "preprod"
+    }
+  },
+  "checks": {
+    "dbsync": {
+      "check": "dbsync",
+      "schema": 1,
+      "generated_at": "2026-11-20T17:18:02Z",
+      "stack": "compose",
+      "network": "preprod",
+      "advance_s": 0,
+      "result": "UNCONFIRMED",
+      "exit_code": 4,
+      "message": "UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving",
+      "samples": [
+        {
+          "ts": "2026-11-20T17:18:02Z",
+          "db_block": 5435496,
+          "db_slot": 139511837,
+          "epoch": 326,
+          "block_time": "2026-11-20T17:17:17Z",
+          "lag_s": 45,
+          "node_block": 5435496,
+          "sync_progress": 100.00,
+          "gap": 0
+        }
+      ],
+      "checks": [
+        {
+          "id": "0",
+          "label": "db-sync not ahead of node",
+          "status": "PASS",
+          "detail": "gap=0"
+        },
+        {
+          "id": "5",
+          "label": "no db-sync errors in last 15m",
+          "status": "PASS",
+          "detail": "0 error lines in 45 lines read"
+        },
+        {
+          "id": "1",
+          "label": "node syncProgress = 100.00",
+          "status": "PASS",
+          "detail": "100.00%"
+        },
+        {
+          "id": "2",
+          "label": "0 <= gap <= 5",
+          "status": "PASS",
+          "detail": "0 blocks"
+        },
+        {
+          "id": "3",
+          "label": "newest block age < 300s",
+          "status": "PASS",
+          "detail": "45s"
+        },
+        {
+          "id": "4",
+          "label": "still advancing",
+          "status": "SKIP",
+          "detail": "single sample"
+        }
+      ],
+      "warnings": [],
+      "effective_result": "UNCONFIRMED"
+    }
+  },
+  "overall": "UNCONFIRMED",
+  "report_file": "report-20261120T171802Z.json",
+  "comparison": {
+    "previous_report": null,
+    "note": "first report in this directory",
+    "compared_checks": [],
+    "not_compared": [],
+    "regressions": [],
+    "improvements": []
+  }
+}

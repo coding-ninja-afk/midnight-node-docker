@@ -1,18 +1,33 @@
 # Midnight Network: DevOps take-home (PreProd FNO)
 
+**What I built:** on one Linux host with Docker, a synced Cardano PreProd node and DB Sync, a
+Midnight node deployed against them with Terraform, and Prometheus/Alertmanager/Grafana
+monitoring with unit-tested alerts. Also: a node health checker that compares each report with the
+previous one, the key-management design, and a Terraform outline of the whole stack with a GitHub
+Actions pipeline. Everything claimed below has a command, a test or a file in
+[`evidence/`](evidence/) behind it. Anything not verified says so.
+
+**State at submission (2026-11-20):** Cardano node and DB Sync are synced and READY. The Midnight
+node **imported and finalized blocks but has not finished syncing, and is paused on purpose** to
+protect the disk (Section 1). The pause is the one genuine blocker I hit: not enough disk on this
+host for Midnight's ~110 GiB initial sync.
+
 | Section | Where | Status |
 |---|---|---|
 | 1. Node setup (Cardano node + DB Sync on PreProd) | [`RUNBOOK.md`](RUNBOOK.md), [`compose-partner-chains.yml`](compose-partner-chains.yml), [`infra/live/preprod-midnight/`](infra/live/preprod-midnight/), [`evidence/`](evidence/) | Cardano node and DB Sync are synced and **READY**. Midnight node deployed; it **imported and finalized blocks** but has **not finished syncing** and is **paused** (details below) |
 | 2. Monitoring and alerting | [`monitoring/`](monitoring/), summary below | Running against the live Cardano stack. **Midnight is not scraped while paused**, so no Midnight alert can fire. Alerts go to a placeholder webhook |
 | 3. Automation (option C: node health checker) | [`scripts/health-check.sh`](scripts/health-check.sh), usage below | Polling, JSON reports, comparison with the previous report; 53 scenario tests. db-sync check run live; Midnight check tested against a mock RPC only |
 | 4. Security and key management | [`SECURITY.md`](SECURITY.md) | Written |
-| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI. Green on `27406f7`: [infra](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44762144069), [monitoring](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44762144135) |
+| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI. Latest green runs at the time of writing, on `4287a84`: [infra](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769819556), [monitoring](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44769817483) |
 
 ## Section 1: status of the Midnight node
 
 **Done and verified on PreProd, 2026-11-20 (UTC):**
 - Cardano node and DB Sync caught up. DB Sync READY at 13:45:51
-  (`evidence/dbsync-ready-2026-11-20-post-tls.txt`), which gated the Midnight start.
+  (`evidence/dbsync-ready-2026-11-20-post-tls.txt`), which gated the Midnight start. Still
+  READY at 17:34:13, with the block advancing 5,435,533 → 5,435,554 over 300 s and 14 s lag
+  (`evidence/dbsync-ready-2026-11-20-final.txt`). The script's "Midnight may start" is its
+  standard READY message; Midnight stays paused for disk.
 - midnight-node 2.1.101 deployed with Terraform (`infra/live/preprod-midnight`, RUNBOOK section 8.3).
   It reads Cardano data through a read-only Postgres role over verified TLS (`VerifyFull`).
 - **It imported and finalized blocks:**
@@ -90,10 +105,17 @@ staleness rules read. Separate pages cover:
 - **Restoring Midnight monitoring is manual.** The target is re-added by hand when the node
   resumes, and nothing alerts if that is forgotten.
 
-**Live state (2026-11-20 15:53 UTC):** `DiskWillFillWithin24h` (warning) has been firing since
-15:17:59. Free space fell from 31.3 GB to 25.4 GB while Midnight ran (13:23 to 14:08), and has
-stayed flat since. The 6-hour trend still contains that drop, so the alert is reading a real trend,
-not malfunctioning. It should clear once the drop leaves the window; that has not been verified.
+**Live state (2026-11-20):** `DiskWillFillWithin24h` (warning) went pending at 15:17:59 and,
+after its 30-minute `for:`, has been **firing since 15:47:59 UTC**. Free space fell from 31.3 GB to
+25.4 GB while Midnight ran (13:23 to 14:08), and has stayed flat since. The 6-hour trend still
+contains that drop, so the alert is reading a real trend, not malfunctioning. It should clear once
+the drop leaves the window; that has not been verified.
+
+Grafana opens on the FNO dashboard. At 17:30 UTC, 13 of its 17 panels returned live data; the 4
+Midnight panels are empty while the node is paused. Its alert panels show the firing disk alert
+(`evidence/grafana-home-2026-11-20.txt`). Grafana's own "Firing alerts" widget only lists
+Grafana-managed rules, and ours are in Prometheus, so read alerts from the dashboard or from
+Alertmanager.
 
 The webhook is a **placeholder** for now (`alertmanager.yml`): alerts are visible in Alertmanager
 and Grafana, but nothing is delivered until a real receiver is configured.
@@ -197,6 +219,52 @@ and the mock Midnight RPC:
 - Midnight stalled against a READY report (status, best and finalized regressions)
 - Midnight READY against a CATCHING_UP report (improvement only)
 
-**Live run (2026-11-20):** cycle 1 UNCONFIRMED, then cycle 2 **READY** ("still advancing confirmed
-across reports (130 s)"), exit 0, no regressions (`evidence/health-check-2026-11-20/`). The
-Midnight check was not run live, because the node is paused (Section 1).
+**Live runs (2026-11-20):** twice, each time cycle 1 UNCONFIRMED, then cycle 2 **READY** ("still
+advancing confirmed across reports (130 s)"), exit 0, no regressions:
+- `evidence/health-check-2026-11-20/` (15:02 to 15:05 UTC)
+- `evidence/health-check-2026-11-20-manual-review/` (17:18 to 17:20 UTC). This run is after the
+  target fix, so its reports record `targets`.
+
+The Midnight check was not run live through the health checker, because the node is paused
+(Section 1). The script it reuses, `midnight-height-check.sh`, did run live against the real node
+(`evidence/midnight-height-2026-11-20.txt`).
+
+## Assumptions
+
+- **Target:** a single local Docker host, not a cloud account. The brief allows the Terraform
+  Docker provider. PreProd only.
+- **Versions, pinned:**
+  - cardano-node 11.0.1
+  - cardano-db-sync 13.7.1.0
+  - Postgres 17.12
+  - midnight-node 2.1.101
+  - indexer-standalone 4.4.101
+- **"Become an FNO" was simulated up to a syncing node.** No validator keys were generated or
+  registered, and no governance step was taken; SECURITY.md covers how I would do that.
+- **Evidence of "running and syncing"** is block progression: best and finalized heights
+  advancing, with 0 verification failures. Reaching the tip was not required, and was not reached.
+- **Alert delivery is out of scope.** The Alertmanager receiver is a placeholder.
+- **Rotation procedure:** where the Midnight docs are silent, SECURITY.md follows the
+  Substrate/partner-chain pattern and says so. Where it could be, behaviour was tested against
+  the 2.1.101 image.
+
+## What I would do differently with more time
+
+- **Size the disk first.** Measure the Midnight node's growth before starting it; that would have
+  avoided the pause. Then finish the sync to the tip and re-run readiness until it says READY
+  rather than CATCHING UP.
+- **Put the keystore on tmpfs in the Terraform module** (`--keystore-path`) before ever enabling
+  validator keys. Today the node would copy seeds onto the chain-data volume (SECURITY.md
+  section 4).
+- **Deliver alerts for real:**
+  - a real receiver
+  - an external dead-man's switch fed by an always-firing `Watchdog` alert
+  - an alert that the Midnight target is missing once the node runs permanently
+- **Run the health checker as a systemd timer**, and export its result as a metric so Prometheus
+  alerts on regressions too.
+- **Real state backend:** S3 with locking, OIDC, and live applies through the self-hosted runner,
+  behind the environment approval.
+- **Faster rebuilds:** bootstrap cardano-node from Mithril and restore db-sync from a snapshot of
+  the same version, instead of a 6+ hour resync.
+- **Confirm the unverified items:** the Preview/Mainnet preset names in `infra/envs`, and the
+  registration and rotation transactions, with Midnight.

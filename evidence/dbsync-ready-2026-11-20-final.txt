@@ -1,0 +1,14 @@
+# scripts/dbsync-status.sh --advance 300, run 2026-11-20T17:29:13Z for final submission evidence (Midnight paused)
+# stack=compose network=preprod
+2026-11-20T17:29:13Z  db-sync: block=5435533 slot=139512501 epoch=326 block_time=2026-11-20T17:28:21Z lag=52s  node: block=5435533 syncProgress=100.00  gap=0
+2026-11-20T17:34:13Z  db-sync: block=5435554 slot=139512839 epoch=326 block_time=2026-11-20T17:33:59Z lag=14s  node: block=5435554 syncProgress=100.00  gap=0
+
+PASS  0 db-sync not ahead of node  (gap=0)
+PASS  5 no db-sync errors in last 15m  (0 error lines in 55 lines read)
+PASS  4 block_no advanced over 300s  (5435533@2026-11-20T17:29:13Z -> 5435554@2026-11-20T17:34:13Z)
+PASS  1 node syncProgress = 100.00  (100.00%)
+PASS  2 0 <= gap <= 5  (0 blocks)
+PASS  3 newest block age < 300s  (14s)
+
+RESULT: READY - db-sync caught up and advancing; Midnight may start
+exit=0
