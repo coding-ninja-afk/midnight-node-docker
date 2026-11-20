@@ -1,0 +1,13 @@
+# stack=compose network=preprod
+2026-11-20T12:36:31Z  db-sync: block=5434725 slot=139494985 epoch=326 block_time=2026-11-20T12:36:25Z lag=6s  node: block=5434725 syncProgress=100.00  gap=0
+2026-11-20T12:41:31Z  db-sync: block=5434735 slot=139495289 epoch=326 block_time=2026-11-20T12:41:29Z lag=2s  node: block=5434735 syncProgress=100.00  gap=0
+
+PASS  0 db-sync not ahead of node  (gap=0)
+PASS  5 no db-sync errors in last 15m  (0 error lines in 128 lines read)
+PASS  4 block_no advanced over 300s  (5434725@2026-11-20T12:36:31Z -> 5434735@2026-11-20T12:41:31Z)
+PASS  1 node syncProgress = 100.00  (100.00%)
+PASS  2 0 <= gap <= 5  (0 blocks)
+PASS  3 newest block age < 300s  (2s)
+
+RESULT: READY - db-sync caught up and advancing; Midnight may start
+exit=0
