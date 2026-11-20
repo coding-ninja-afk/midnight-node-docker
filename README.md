@@ -105,14 +105,20 @@ staleness rules read. Separate pages cover:
 - **Restoring Midnight monitoring is manual.** The target is re-added by hand when the node
   resumes, and nothing alerts if that is forgotten.
 
-**Live state (2026-11-20):** `DiskWillFillWithin24h` (warning) went pending at 15:17:59 and,
-after its 30-minute `for:`, has been **firing since 15:47:59 UTC**. Free space fell from 31.3 GB to
-25.4 GB while Midnight ran (13:23 to 14:08), and has stayed flat since. The 6-hour trend still
-contains that drop, so the alert is reading a real trend, not malfunctioning. It should clear once
-the drop leaves the window; that has not been verified.
+**Live alert (2026-11-20): `DiskWillFillWithin24h` fired, then cleared on its own.**
+- **The cause:** free space fell from 31.3 GB to 25.4 GB while Midnight ran (13:23 to 14:08).
+- **Fired:** the warning went pending at 15:17:59 and, after its 30-minute `for:`, fired at
+  15:47:59 UTC, because its 6-hour trend contained that drop.
+- **Cleared:** at about 18:34 UTC, with no action taken. Free space had stayed flat (25.3 GB), and
+  the flat readings pulled the trend back up. At 19:33 the 24-hour prediction was +18.3 GB and
+  nothing was firing.
+
+So the alert behaved as designed: it reflected a real burst, then recovered without anyone
+touching it. It cleared earlier than the ~19:23 I had guessed (when the drop leaves the window),
+because the flat readings flattened the slope first.
 
 Grafana opens on the FNO dashboard. At 17:30 UTC, 13 of its 17 panels returned live data; the 4
-Midnight panels are empty while the node is paused. Its alert panels show the firing disk alert
+Midnight panels are empty while the node is paused. Its alert panels showed the then-firing disk alert
 (`evidence/grafana-home-2026-11-20.txt`). Grafana's own "Firing alerts" widget only lists
 Grafana-managed rules, and ours are in Prometheus, so read alerts from the dashboard or from
 Alertmanager.
