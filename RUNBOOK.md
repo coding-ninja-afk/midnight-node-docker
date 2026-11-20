@@ -342,6 +342,11 @@ and its readiness evidence would not apply.
    per block marginal, ~11 GB/h at ~7,000 blocks/min, so an archive sync of 3.5 M blocks needs
    **~110 GiB**. To pause safely: `docker stop -t 60 mn-preprod-midnight-indexer
    mn-preprod-midnight-node` (data kept), and empty the monitoring target so the stop doesn't page.
+   **To resume** (it is paused like this since 13:58 UTC on 2026-11-20): first make room for the
+   rest of the sync (~104 GiB more at the time it stopped), then
+   `docker start mn-preprod-midnight-node mn-preprod-midnight-indexer`. Re-add the monitoring target
+   (step 7), confirm `midnight-node` is UP at http://127.0.0.1:9090/targets, and rerun the readiness
+   check. Nothing alerts if the target is forgotten (monitoring/README.md, "Known limitations").
 
 ## 9. Day-2 operations
 

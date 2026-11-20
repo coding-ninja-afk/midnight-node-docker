@@ -196,11 +196,28 @@ groups:
           description: "The staleness alerts cannot evaluate for this target. After a restart, a long ledger replay can cause this; otherwise a metric was renamed or disabled."
           first_response: "1) docker logs cardano-node: replaying the ledger? (then wait). 2) Otherwise compare the scrape output (curl via the sidecar) with the metric names in the rules; an upgrade may have renamed it."
           runbook: "monitoring/README.md#monitoringmetricsmissing"
+      # Every series an alert above reads must be present, not just one per target: otherwise a
+      # renamed finality or block-height metric silences its alert while this check stays green.
+      #   db-sync:       slot (tip age, > 0) + both block heights (DbSyncBehindNode)
+      #   midnight-node: best + finalized + sync_target heights + major-syncing flag (all exported
+      #                  even with 0 peers: checked on a 2.1.101 dev node, 2026-11-20)
+      #   node-exporter: avail AND size for the same filesystem, with DiskSpaceLow's own fstype
+      #                  filter (a container's overlay "/" would otherwise satisfy this check while
+      #                  every disk alert filters it out)
       - alert: MonitoringMetricsMissing
         expr: |
-          (up{job="cardano-db-sync"} == 1 unless on (job, instance) (cardano_db_sync_db_slot_height > 0))
-          or (up{job="midnight-node"} == 1 unless on (job, instance) substrate_block_height{status="best"})
-          or (up{job="node-exporter"} == 1 unless on (job, instance) node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker"})
+          (up{job="cardano-db-sync"} == 1 unless on (job, instance) (
+               (cardano_db_sync_db_slot_height > 0)
+               and on (job, instance) cardano_db_sync_db_block_height
+               and on (job, instance) cardano_db_sync_node_block_height))
+          or (up{job="midnight-node"} == 1 unless on (job, instance) (
+               substrate_block_height{status="best"}
+               and on (job, instance) substrate_block_height{status="finalized"}
+               and on (job, instance) substrate_block_height{status="sync_target"}
+               and on (job, instance) substrate_sub_libp2p_is_major_syncing))
+          or (up{job="node-exporter"} == 1 unless on (job, instance) (
+               node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}
+               and on (job, instance, mountpoint, device) node_filesystem_size_bytes{mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}))
         for: 15m
         labels: { severity: page, component: monitoring, grace: 15m }
         annotations:

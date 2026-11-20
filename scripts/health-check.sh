@@ -26,7 +26,12 @@
 # Exit code of the LAST cycle:
 #   0 OK          every check READY and no regression
 #   1 REGRESSED   a check is FAULT, or something got worse since the previous report
-#   2 ERROR       a check could not run (or bad arguments / unwritable out-dir / dir locked)
+#   2 ERROR       a check could not run, the report could not be written, or bad arguments /
+#                 unwritable out-dir / dir locked
+#
+# Reports record each check's target (dbsync: stack + network; midnight: RPC URL without any
+# user:password). A check is only compared with a previous report of the SAME target; a different or
+# unrecorded target is listed under comparison.not_compared instead.
 #   3 NOT READY   catching up or unconfirmed, nothing got worse
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -64,13 +69,25 @@ exec 9>"$out_dir/.lock"
 flock -n 9 || { echo "error: another health-check is already writing to '$out_dir'" >&2; exit 2; }
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 
+# What each check points at. Reports are only compared check by check when this matches, so a
+# different stack, network or RPC in the same out-dir never yields false regressions or confirmations.
+# Credentials in the RPC URL (scheme://user:pass@host) are stripped before they reach a report.
+targets="$(jq -nc --arg stack "$stack" --arg network "$network" --arg rpc "$(sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]*@#\1#' <<<"$mn_rpc")" \
+  --arg checks "$checks" '($checks | split(",")) as $c
+  | {dbsync: {stack: $stack, network: $network}, midnight: {rpc: $rpc}} | with_entries(select(.key as $k | $c | index($k)))')"
+
 # ---- comparison with the previous report (pure jq: $prev and $cur are whole reports) ------------
 # shellcheck disable=SC2016  # jq program, not shell
 COMPARE='
   def rank: {"READY":0, "UNCONFIRMED":1, "CATCHING_UP":2, "FAULT":3, "ERROR":3}[.] // 3;
   def last_sample($c): ($c.samples // []) | last;
   ($cur.generated_epoch - $prev.generated_epoch) as $dt
-  | [ ($cur.checks | keys[]) as $k | select($prev.checks[$k] != null)
+  | def same_target($k): $prev.targets[$k]? != null and $prev.targets[$k] == $cur.targets[$k];
+  [ $cur.checks | keys[] | select($prev.checks[.] != null and same_target(.)) ] as $compared
+  | [ $cur.checks | keys[] | select($prev.checks[.] != null and (same_target(.) | not))
+      | {check: ., reason: (if $prev.targets[.]? == null then "previous report has no recorded target" else "different target" end),
+         previous_target: $prev.targets[.]?, current_target: $cur.targets[.]} ] as $not_compared
+  | [ $compared[] as $k
       | $prev.checks[$k] as $p | $cur.checks[$k] as $c
       | (if ($c.result | rank) > ($p.result | rank) or (($c.result | rank) == 3 and $c.result != $p.result)
            then {check: $k, kind: "regression", what: "status", from: $p.result, to: $c.result} else empty end),
@@ -98,6 +115,7 @@ COMPARE='
             end )
     ]
   | {previous_report: $prev_file, previous_generated_at: $prev.generated_at, seconds_since_previous: $dt,
+     compared_checks: $compared, not_compared: $not_compared,
      regressions: map(select(.kind == "regression") | del(.kind)), improvements: map(select(.kind == "improvement") | del(.kind))}
 '
 
@@ -122,8 +140,8 @@ run_cycle() {  # $1=cycle number; sets CYCLE_EXIT
     checks_json="$(jq -c --arg c "$c" --slurpfile r "$f" '. + {($c): $r[0]}' <<<"$checks_json")"
   done
   report="$(jq -n --arg at "$ts" --argjson epoch "$epoch" --argjson n "$n" --argjson interval "$interval" \
-    --argjson checks "$checks_json" '{schema: 1, generated_at: $at, generated_epoch: $epoch, cycle: $n, interval_s: $interval,
-                                      checks: $checks}')"
+    --argjson checks "$checks_json" --argjson targets "$targets" '{schema: 1, generated_at: $at, generated_epoch: $epoch, cycle: $n,
+                                      interval_s: $interval, targets: $targets, checks: $checks}')"
   # Compare with the previous report (latest.json); an unreadable one is noted, never fatal.
   # The previous report is validated ONCE and passed on as a value (or null): a corrupt latest.json
   # once made a later jq step fail and an empty report replace latest.json (caught by the tests).
@@ -133,9 +151,9 @@ run_cycle() {  # $1=cycle number; sets CYCLE_EXIT
     comparison="$(jq -n --argjson cur "$report" --argjson prev "$prev_json" --arg prev_file "$(jq -r '.report_file // "latest.json"' <<<"$prev_json")" \
       --argjson stall "$stall_after" "$COMPARE")"
   elif [[ -f "$prev_file" ]]; then
-    comparison='{"previous_report": null, "note": "previous latest.json unreadable or from another schema; not compared", "regressions": [], "improvements": []}'
+    comparison='{"previous_report": null, "note": "previous latest.json unreadable or from another schema; not compared", "compared_checks": [], "not_compared": [], "regressions": [], "improvements": []}'
   else
-    comparison='{"previous_report": null, "note": "first report in this directory", "regressions": [], "improvements": []}'
+    comparison='{"previous_report": null, "note": "first report in this directory", "compared_checks": [], "not_compared": [], "regressions": [], "improvements": []}'
   fi
   local name; name="report-$(date -u -d "@$epoch" +%Y%m%dT%H%M%SZ).json"
   # effective_result: a single-sample db-sync check can only say UNCONFIRMED (it cannot see progress);
@@ -146,7 +164,7 @@ run_cycle() {  # $1=cycle number; sets CYCLE_EXIT
     --argjson stall "$stall_after" '
     .checks |= with_entries(
         .value.effective_result = (
-          if .key == "dbsync" and .value.result == "UNCONFIRMED" and $cmp.previous_report != null
+          if .key == "dbsync" and .value.result == "UNCONFIRMED" and (($cmp.compared_checks // []) | index("dbsync")) != null
              and ($cmp.seconds_since_previous // 0) >= $stall
              and (((.value.samples // []) | last | .db_block) // 0) > ((($prev.checks.dbsync.samples // []) | last | .db_block) // 1e18)
           then "READY" else .value.result end)
@@ -161,9 +179,19 @@ run_cycle() {  # $1=cycle number; sets CYCLE_EXIT
     echo "$ts cycle=$n ERROR: could not build the report; nothing written, latest.json unchanged" >&2
     CYCLE_EXIT=2; return
   fi
-  # Atomic writes: a reader never sees half a report.
-  printf '%s\n' "$report" > "$out_dir/.$name.tmp" && mv -f "$out_dir/.$name.tmp" "$out_dir/$name"
-  cp -f "$out_dir/$name" "$out_dir/.latest.tmp" && mv -f "$out_dir/.latest.tmp" "$out_dir/latest.json"
+  # Atomic writes: a reader never sees half a report. A failed write (disk full, permissions, ...)
+  # is an ERROR for this cycle, never a silent success: the report is written first, and latest.json
+  # is only replaced once the report is safely on disk, so latest.json always holds a complete report.
+  if ! { printf '%s\n' "$report" > "$out_dir/.$name.tmp" && mv -f "$out_dir/.$name.tmp" "$out_dir/$name"; } 2>"$work/write.err"; then
+    rm -f "$out_dir/.$name.tmp" 2>/dev/null
+    echo "$ts cycle=$n ERROR: could not write $out_dir/$name ($(tr '\n' ' ' < "$work/write.err")); latest.json unchanged" >&2
+    CYCLE_EXIT=2; return
+  fi
+  if ! { cp -f "$out_dir/$name" "$out_dir/.latest.tmp" && mv -fT "$out_dir/.latest.tmp" "$out_dir/latest.json"; } 2>"$work/write.err"; then
+    rm -f "$out_dir/.latest.tmp" 2>/dev/null
+    echo "$ts cycle=$n ERROR: wrote $out_dir/$name but could not update latest.json ($(tr '\n' ' ' < "$work/write.err")); the next cycle compares with the older latest.json" >&2
+    CYCLE_EXIT=2; return
+  fi
   # Rotation: newest $keep reports stay.
   find "$out_dir" -maxdepth 1 -name 'report-*.json' -printf '%f\n' | sort | head -n "-$keep" | while read -r old; do rm -f "$out_dir/$old"; done
 

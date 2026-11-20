@@ -108,7 +108,16 @@ staleness page.
 so on its own a dead target would look like silence. Separate pages cover that:
 - `MonitoringTargetDown` for `up == 0`
 - `MonitoringTargetMissing` for a target missing entirely
-- `MonitoringMetricsMissing` for a scrape that works but lacks the needed metric
+- `MonitoringMetricsMissing` for a scrape that works but lacks a metric an alert reads. It
+  checks **every** input series, not one per target, because a single renamed series silences its
+  alert while the others look healthy:
+  - db-sync: the slot (> 0), plus `db_block_height` and `node_block_height` (`DbSyncBehindNode`)
+  - midnight-node: `best`, `finalized` and `sync_target` heights, plus the major-syncing flag
+    (`MidnightFinalityStalled`, `MidnightBehindTip`). All four are exported even with 0 peers
+    (checked on a 2.1.101 dev node, 2026-11-20), so this does not false-alarm on an isolated node.
+  - node-exporter: free **and** total size of the same filesystem, using the disk alerts' own
+    `fstype` filter. Without the filter, node-exporter's own overlay `/` (host root not mounted)
+    passed this check while every disk alert ignored it.
 - `MonitoringParamsMissing` when the network constants are not loaded
 
 **Page on the cause.** Alertmanager inhibitions, tested live:
@@ -133,7 +142,7 @@ read the previous minute's values.
 | DiskWillFillWithin24h | warning | 6 h linear prediction < 0 in 24 h, with ≥ 3 h of history, for 30 m | webhook |
 | MonitoringTargetDown | page | `up == 0`, for 5 m | webhook |
 | MonitoringTargetMissing | page | no target for cardano-node / db-sync / node-exporter, for 10 m | webhook |
-| MonitoringMetricsMissing | page | scraped but key metric absent: 30 m (cardano-node, may replay), 15 m (others) | webhook (inhibited by target down) |
+| MonitoringMetricsMissing | page | scraped but a metric an alert reads is absent: 30 m (cardano-node, may replay), 15 m (others) | webhook (inhibited by target down) |
 | MonitoringParamsMissing | page | network constants not loaded, for 5 m | webhook |
 
 ## First response, per alert
@@ -210,7 +219,7 @@ Exactly one `params-<network>.yml` must be in `prometheus/rules/`. Reload Promet
 
 ## Tests (`scripts/check.sh`)
 
-`promtool test rules` runs **21 + 1 scenarios**, each checking **all 13 alerts** at every evaluation
+`promtool test rules` runs **29 + 1 scenarios**, each checking **all 13 alerts** at every evaluation
 time (expected ones with exact labels and annotations, everything else silent), 5 runs per check:
 
 | Scenario | Expected |
@@ -236,6 +245,11 @@ time (expected ones with exact labels and annotations, everything else silent), 
 | **failed scrape:** cardano-node down, its series vanish | `MonitoringTargetDown` (staleness rules cannot see it) |
 | metric gone with a working scrape / no node-exporter target / Midnight not configured | `MonitoringMetricsMissing`, `MonitoringTargetMissing`; no Midnight alerts |
 | cardano-node scraped without a slot for 40 min | `MonitoringMetricsMissing` after 30 min |
+| db-sync scraped, `node_block_height` gone / `db_block_height` gone (2 tests) | `MonitoringMetricsMissing` at 30 min, nothing at 10 |
+| Midnight scraped, `finalized` / `sync_target` / major-syncing flag gone (3 tests) | `MonitoringMetricsMissing` for midnight-node |
+| node-exporter sees only its own overlay `/` | `MonitoringMetricsMissing` (the disk alerts filter overlay out) |
+| node-exporter has free space but no size for `/` | `MonitoringMetricsMissing` |
+| control: ext4 root plus an overlay mount | nothing |
 | params file not loaded (separate file) | `MonitoringParamsMissing` |
 
 **Expected values were computed by hand,** not copied from promtool's output: 18h 16m 40s behind
@@ -247,7 +261,7 @@ The script also checks:
 - that every dashboard expression parses, and that the dashboard's datasource uid matches
 - `docker compose config`
 
-**`--mutations`** breaks the rules on purpose, 16 ways, and requires the tests to fail each time.
+**`--mutations`** breaks the rules on purpose, 23 ways (one per required metric among them), and requires the tests to fail each time.
 A mutation whose pattern no longer applies is a setup error, never counted as caught.
 A **control run** with the unmodified rules must pass first: the first version of the harness
 failed on file permissions and made every mutation look "caught".
@@ -261,6 +275,31 @@ failed on file permissions and made every mutation look "caught".
 - A stopped sidecar fires `MonitoringTargetDown` and clears after restart
   (`evidence/monitoring-live-scrape-failure-2026-11-20.txt`).
 - The inhibitions work (`evidence/monitoring-inhibition-2026-11-20.txt`).
+
+## Known limitations
+
+These are deliberate gaps for this take-home, not oversights. Each one needs something outside
+this host, or a decision that belongs to whoever operates the node.
+
+**No external watchdog.** Every alert here depends on Prometheus and Alertmanager running and on a
+receiver being reachable. If the host, Prometheus or Alertmanager dies, **nothing pages, and
+silence looks like health**. Nothing alerts on failed notifications or failed rule evaluations
+either. While the webhook is a placeholder, every notification fails anyway. Before production:
+- add an always-firing `Watchdog` alert, routed to an **external** dead-man's switch
+  (Healthchecks.io, PagerDuty heartbeats, Opsgenie heartbeat). That service pages when the
+  heartbeat **stops**.
+- once a real receiver exists, alert on `alertmanager_notifications_failed_total` and
+  `prometheus_rule_evaluation_failures_total`.
+- run monitoring on a different host, or at least a different failure domain, from the node.
+
+**Restoring Midnight monitoring is manual.** `prometheus/targets/midnight-node.yml` is empty while
+the node is paused (since 2026-11-20 13:58 UTC), so no Midnight alert can fire.
+`MonitoringTargetMissing` deliberately does not cover Midnight; otherwise the paused node would
+page all the time. The catch: if the node is started again and the target is **not** re-added,
+it runs unmonitored and nothing says so. When resuming (RUNBOOK section 8.3, steps 7 and 8):
+1. Re-add the target (the commented lines in that file).
+2. Check that http://127.0.0.1:9090/targets shows `midnight-node` as UP.
+3. Once it's permanent, add `absent(up{job="midnight-node"})` to `MonitoringTargetMissing`.
 
 ## Dashboard
 

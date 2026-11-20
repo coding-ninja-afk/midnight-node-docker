@@ -3,10 +3,10 @@
 | Section | Where | Status |
 |---|---|---|
 | 1. Node setup (Cardano node + DB Sync on PreProd) | [`RUNBOOK.md`](RUNBOOK.md), [`compose-partner-chains.yml`](compose-partner-chains.yml), [`infra/live/preprod-midnight/`](infra/live/preprod-midnight/), [`evidence/`](evidence/) | Cardano node and DB Sync are synced and **READY**. Midnight node deployed; it **imported and finalized blocks** but has **not finished syncing** and is **paused** (details below) |
-| 2. Monitoring and alerting | [`monitoring/`](monitoring/), summary below | Running against the live stack |
-| 3. Automation (option C: node health checker) | [`scripts/health-check.sh`](scripts/health-check.sh), usage below | Polling, JSON reports, comparison with the previous report; 49 scenario tests; run live |
+| 2. Monitoring and alerting | [`monitoring/`](monitoring/), summary below | Running against the live Cardano stack. **Midnight is not scraped while paused**, so no Midnight alert can fire. Alerts go to a placeholder webhook |
+| 3. Automation (option C: node health checker) | [`scripts/health-check.sh`](scripts/health-check.sh), usage below | Polling, JSON reports, comparison with the previous report; 53 scenario tests. db-sync check run live; Midnight check tested against a mock RPC only |
 | 4. Security and key management | [`SECURITY.md`](SECURITY.md) | Written |
-| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI, green: [run 44578932929](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44578932929) |
+| 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI. Green on `27406f7`: [infra](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44762144069), [monitoring](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44762144135) |
 
 ## Section 1: status of the Midnight node
 
@@ -31,9 +31,12 @@
   tip, so it has not been verified as an in-sync node, and it is not a validator: no keys are
   registered.
 - **It is paused on purpose** (stopped 13:58:33 UTC, data kept). Its initial sync writes ~11 GB/h
-  and needs ~110 GiB in total, but only 24 GB were free, on the filesystem that also holds Postgres
-  and cardano-node. To resume: grow the disk, `docker start` the node and indexer, and re-add the
-  monitoring target (RUNBOOK section 8.3, step 8).
+  and needs ~110 GiB in total: ~104 GiB more when it stopped. Only 24 GB were free, on the
+  filesystem that also holds Postgres and cardano-node. To resume: make room, `docker start` the
+  node and indexer, and re-add the monitoring target (RUNBOOK section 8.3, steps 7 and 8).
+- **While it is paused, Midnight is not monitored.** Its Prometheus target is empty, so none of the
+  Midnight alerts below can fire, and nothing alerts if it is restarted without re-adding the target
+  ([known limitations](monitoring/README.md#known-limitations)).
 
 ## Section 2: alert design
 
@@ -76,8 +79,21 @@ them against fresh Cardano data from db-sync. So we page on:
 staleness rules read. Separate pages cover:
 - targets down
 - targets missing entirely
-- scrapes that succeed but lack the needed metric
+- scrapes that succeed but lack **any** series an alert reads. Examples: Midnight's finalized
+  height, db-sync's block heights, or disk size for the host filesystem rather than a container's
+  overlay. Each is unit-tested, and mutation-tested by removing it.
 - missing network constants
+
+**Known limitations** ([detail](monitoring/README.md#known-limitations)):
+- **No external watchdog.** If Prometheus, Alertmanager or the host dies, nothing pages. Before
+  production, an always-firing `Watchdog` alert should feed an external dead-man's switch.
+- **Restoring Midnight monitoring is manual.** The target is re-added by hand when the node
+  resumes, and nothing alerts if that is forgotten.
+
+**Live state (2026-11-20 15:53 UTC):** `DiskWillFillWithin24h` (warning) has been firing since
+15:17:59. Free space fell from 31.3 GB to 25.4 GB while Midnight ran (13:23 to 14:08), and has
+stayed flat since. The 6-hour trend still contains that drop, so the alert is reading a real trend,
+not malfunctioning. It should clear once the drop leaves the window; that has not been verified.
 
 The webhook is a **placeholder** for now (`alertmanager.yml`): alerts are visible in Alertmanager
 and Grafana, but nothing is delivered until a real receiver is configured.
@@ -124,7 +140,13 @@ scripts/health-check.sh --checks dbsync --count 2 --interval 130   # what produc
   - `effective_result`
 - `comparison`:
   - the previous report and the seconds since it
+  - `compared_checks[]` and `not_compared[]` (see the next paragraph)
   - `regressions[]` and `improvements[]`, each with `check`, `what`, `from` and `to`
+
+**Only the same target is compared.** Each report records `targets`: the stack and network for
+db-sync, and the RPC URL for Midnight, with any `user:password` stripped. A check is compared only
+with a previous report of the same target. A different target, or an older report that recorded none,
+is listed under `not_compared`, and it never produces a regression or confirms progress.
 
 **What counts as a regression** (compared with the previous report):
 - **Status got worse:** READY → UNCONFIRMED → CATCHING_UP → FAULT/ERROR, or one failure state
@@ -147,7 +169,7 @@ confirmation, and no regression.
 |---|---|
 | 0 | READY, no regressions |
 | 1 | a FAULT, or any regression |
-| 2 | a check could not run, or bad arguments / unwritable or locked out-dir |
+| 2 | a check could not run, the report or `latest.json` could not be written, or bad arguments / unwritable or locked out-dir |
 | 3 | catching up or unconfirmed, nothing got worse |
 
 **Robustness:**
@@ -155,9 +177,10 @@ confirmation, and no regression.
 - A check that crashes without output is recorded as ERROR, together with its output.
 - An unreadable previous report is noted and skipped. It used to replace `latest.json` with an empty
   file: the tests caught that, and it's fixed.
-- A cycle whose report cannot be built writes nothing and exits 2.
+- A cycle whose report cannot be built or written exits 2 and leaves `latest.json` on the previous
+  complete report. `latest.json` is only replaced after the new report is on disk.
 
-**Tested** with `scripts/tests/run-tests.sh` (49 scenarios, run in CI), against the fake `docker`
+**Tested** with `scripts/tests/run-tests.sh` (53 scenarios, run in CI), against the fake `docker`
 and the mock Midnight RPC:
 - first report
 - advance confirmed across reports
@@ -166,6 +189,8 @@ and the mock Midnight RPC:
 - READY → FAULT
 - service down (ERROR)
 - corrupt previous report
+- a previous report from another network, or with no recorded target: not compared
+- report write blocked, and `latest.json` write blocked: exit 2, previous `latest.json` intact
 - 3 polling cycles with `--keep 2` rotation
 - a locked out-dir and an unwritable out-dir
 - bad arguments

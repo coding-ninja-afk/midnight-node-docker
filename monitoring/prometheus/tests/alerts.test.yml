@@ -2751,3 +2751,952 @@ tests:
   - eval_time: 45m
     alertname: MonitoringParamsMissing
     exp_alerts: []
+- interval: 1m
+  name: 'missing metric: db-sync scraped but node_block_height gone (DbSyncBehindNode would be silent); pages after 15 min, not at 10'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: cardano-db-sync
+        instance: cardano-db-sync:8080
+      exp_annotations:
+        summary: cardano-db-sync is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: db-sync scraped but db_block_height gone (DbSyncBehindNode would be silent)'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: cardano-db-sync
+        instance: cardano-db-sync:8080
+      exp_annotations:
+        summary: cardano-db-sync is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: midnight scraped, best present, finalized gone (MidnightFinalityStalled would be silent)'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: midnight-node
+        instance: midnight-node:9615
+      exp_annotations:
+        summary: midnight-node is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: midnight scraped, sync_target gone (MidnightBehindTip would be silent)'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: midnight-node
+        instance: midnight-node:9615
+      exp_annotations:
+        summary: midnight-node is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: midnight scraped, major-syncing flag gone (MidnightBehindTip would be silent)'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: midnight-node
+        instance: midnight-node:9615
+      exp_annotations:
+        summary: midnight-node is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: node-exporter sees only its own overlay / (host root not mounted); disk alerts filter it out, so this pages'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="overlay",device="overlay"}
+    values: 5000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="overlay",device="overlay"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: node-exporter
+        instance: node-exporter:9100
+      exp_annotations:
+        summary: node-exporter is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric: node-exporter has avail but no size for / (the 10% rule would be silent)'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+        grace: 15m
+        job: node-exporter
+        instance: node-exporter:9100
+      exp_annotations:
+        summary: node-exporter is scraped but a metric the alerts need is missing
+        description: The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire.
+        first_response: Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host.
+        runbook: monitoring/README.md#monitoringmetricsmissing
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+- interval: 1m
+  name: 'missing metric control: host ext4 root plus an overlay mount at /var/lib/docker: quiet'
+  input_series:
+  - series: up{job="cardano-node",instance="cardano-node:12799"}
+    values: 1x120
+  - series: up{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 1x120
+  - series: up{job="node-exporter",instance="node-exporter:9100"}
+    values: 1x120
+  - series: up{job="midnight-node",instance="midnight-node:9615"}
+    values: 1x120
+  - series: cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 100000+60x120
+  - series: cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}
+    values: 5000+3x120
+  - series: substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}
+    values: 1000+10x120
+  - series: substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}
+    values: 998+10x120
+  - series: substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}
+    values: 1001+10x120
+  - series: substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}
+    values: '0x120'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 60000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}
+    values: 120000000000x120
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/var/lib/docker",fstype="overlay",device="overlay"}
+    values: 1000000000x120
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/var/lib/docker",fstype="overlay",device="overlay"}
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []

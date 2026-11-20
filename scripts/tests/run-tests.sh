@@ -135,12 +135,15 @@ done
 HC="$SCRIPTS/health-check.sh"
 hc_ok() { echo "ok    health/$1  ($2)"; pass=$((pass+1)); }
 hc_fail() { echo "FAIL  health/$1  $2"; sed 's/^/        /' "${3:-/dev/null}"; fail=$((fail+1)); }
-# A previous report "N seconds ago" with the given check object (raw JSON).
-plant_prev() {  # $1=out-dir $2=seconds ago $3=check name $4=check json
-  mkdir -p "$1"; local e=$(( $(date +%s) - $2 ))
-  jq -n --argjson e "$e" --arg c "$3" --argjson chk "$4" \
+# A previous report "N seconds ago" with the given check object (raw JSON) and target (default: the
+# dbsync target hc_db uses; "none" = a report without targets, as written before they were recorded).
+plant_prev() {  # $1=out-dir $2=seconds ago $3=check name $4=check json [$5=target json | none]
+  local default='{"stack":"compose","network":"preprod"}'
+  mkdir -p "$1"; local e=$(( $(date +%s) - $2 )) t="${5:-$default}"
+  jq -n --argjson e "$e" --arg c "$3" --argjson chk "$4" --arg t "$t" \
     '{schema: 1, generated_at: ($e | todate), generated_epoch: $e, cycle: 1, overall: $chk.result, report_file: "report-planted.json",
-      checks: {($c): ($chk + {effective_result: $chk.result})}, comparison: {regressions: [], improvements: []}}' > "$1/latest.json"
+      checks: {($c): ($chk + {effective_result: $chk.result})}, comparison: {regressions: [], improvements: []}}
+     + (if $t == "none" then {} else {targets: {($c): ($t | fromjson)}} end)' > "$1/latest.json"
 }
 hc_db() {  # $1=name; runs health-check (dbsync only) with fake docker on $D; out-dir $WORK/hc-$1
   PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" DBSYNC_RETRY_DELAY=0 "$HC" --checks dbsync --count 1 --out-dir "$WORK/hc-$1" > "$WORK/hc-$1.out" 2>&1
@@ -187,6 +190,44 @@ hc_db corrupt; rc=$?
 if [[ $rc == 3 ]] && jq -e '.comparison.note | test("unreadable")' "$WORK/hc-corrupt/latest.json" >/dev/null
 then hc_ok corrupt_previous "unreadable previous report noted, not fatal"; else hc_fail corrupt_previous "exit $rc" "$WORK/hc-corrupt.out"; fi
 
+# Different targets are never compared: a READY report for another network 600 s ago, same block.
+# Compared, this would be a status regression AND a stall; it must be neither, and must not confirm.
+newcase hc_othertarget; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"
+plant_prev "$WORK/hc-othertarget" 600 dbsync "$(dbprev 1000 READY)" '{"stack":"compose","network":"mainnet"}'
+hc_db othertarget; rc=$?; R="$WORK/hc-othertarget/latest.json"
+if [[ $rc == 3 ]] && jq -e '(.comparison.regressions | length) == 0 and (.comparison.improvements | length) == 0
+     and .comparison.compared_checks == [] and .comparison.not_compared[0].check == "dbsync"
+     and .comparison.not_compared[0].reason == "different target" and .comparison.not_compared[0].previous_target.network == "mainnet"
+     and .targets.dbsync == {stack: "compose", network: "preprod"} and .checks.dbsync.effective_result == "UNCONFIRMED"' "$R" >/dev/null
+then hc_ok different_target_not_compared "mainnet READY vs preprod: no regression, no confirmation, listed in not_compared, exit 3"
+else hc_fail different_target_not_compared "exit $rc" "$WORK/hc-othertarget.out"; fi
+# A previous report without recorded targets (older format) is not compared either, even if it would confirm.
+newcase hc_notarget; row 1030 20 > "$D/db_rows"; tip 1031 100.00 > "$D/node_tips"
+plant_prev "$WORK/hc-notarget" 600 dbsync "$(dbprev 1000)" none
+hc_db notarget; rc=$?; R="$WORK/hc-notarget/latest.json"
+if [[ $rc == 3 ]] && jq -e '.checks.dbsync.effective_result == "UNCONFIRMED"
+     and .comparison.not_compared[0].reason == "previous report has no recorded target"' "$R" >/dev/null
+then hc_ok unrecorded_target_not_compared "previous report without targets: not compared, not confirmed, exit 3"
+else hc_fail unrecorded_target_not_compared "exit $rc" "$WORK/hc-notarget.out"; fi
+
+# A failed report write is an ERROR (exit 2), and latest.json keeps the previous complete report.
+# The write is blocked by directories where the temp files go (report: one per second of the next 30 s).
+newcase hc_wfail; row 1030 20 > "$D/db_rows"; tip 1031 100.00 > "$D/node_tips"; plant_prev "$WORK/hc-wfail" 600 dbsync "$(dbprev 1000)"
+before="$(sha256sum < "$WORK/hc-wfail/latest.json")"; now=$(date -u +%s)
+for i in $(seq 0 30); do mkdir -p "$WORK/hc-wfail/.report-$(date -u -d "@$((now + i))" +%Y%m%dT%H%M%SZ).json.tmp"; done
+hc_db wfail; rc=$?
+if [[ $rc == 2 ]] && grep -q "ERROR: could not write" "$WORK/hc-wfail.out" && [[ "$(sha256sum < "$WORK/hc-wfail/latest.json")" == "$before" ]] \
+   && [[ $(find "$WORK/hc-wfail" -maxdepth 1 -name 'report-*.json' | wc -l) == 0 ]] && ! grep -q "cycle=1 overall=" "$WORK/hc-wfail.out"
+then hc_ok report_write_failed "report write blocked: exit 2, error logged, latest.json unchanged"
+else hc_fail report_write_failed "exit $rc" "$WORK/hc-wfail.out"; fi
+newcase hc_lfail; row 1030 20 > "$D/db_rows"; tip 1031 100.00 > "$D/node_tips"; plant_prev "$WORK/hc-lfail" 600 dbsync "$(dbprev 1000)"
+before="$(sha256sum < "$WORK/hc-lfail/latest.json")"; mkdir -p "$WORK/hc-lfail/.latest.tmp"
+hc_db lfail; rc=$?
+if [[ $rc == 2 ]] && grep -q "could not update latest.json" "$WORK/hc-lfail.out" && [[ "$(sha256sum < "$WORK/hc-lfail/latest.json")" == "$before" ]] \
+   && [[ $(find "$WORK/hc-lfail" -maxdepth 1 -name 'report-*.json' | wc -l) == 1 ]]
+then hc_ok latest_write_failed "latest.json update blocked: exit 2 (even though the check was READY), old latest.json intact"
+else hc_fail latest_write_failed "exit $rc" "$WORK/hc-lfail.out"; fi
+
 newcase hc_rotate; for i in 1 2 3; do row $((1000 + i * 10)) 20; done > "$D/db_rows"; for i in 1 2 3; do tip $((1001 + i * 10)) 100.00; done > "$D/node_tips"
 PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$HC" --checks dbsync --count 3 --interval 1 --keep 2 --out-dir "$WORK/hc-rotate" > "$WORK/hc-rotate.out" 2>&1; rc=$?
 n=$(find "$WORK/hc-rotate" -name 'report-*.json' | wc -l); cyc=$(jq .cycle "$WORK/hc-rotate/latest.json")
@@ -207,8 +248,8 @@ done
 # Midnight through the mock RPC (each run takes ~60 s: 3 samples, 30 s apart); both in parallel.
 hcport=18990; HCPIDS=()
 mnprev() { jq -nc --argjson b "$1" --argjson f "$2" --arg r "$3" '{check: "midnight", result: $r, exit_code: 0, samples: [{best: $b, finalized: $f, highest: ($b + 1), gap: 1, peers: 8, is_syncing: false}]}'; }
-plant_prev "$WORK/hc-mn-stalled" 600 midnight "$(mnprev 5000 4998 READY)"
-plant_prev "$WORK/hc-mn-ready" 600 midnight "$(mnprev 900 890 CATCHING_UP)"
+plant_prev "$WORK/hc-mn-stalled" 600 midnight "$(mnprev 5000 4998 READY)" "{\"rpc\":\"http://127.0.0.1:$hcport\"}"
+plant_prev "$WORK/hc-mn-ready" 600 midnight "$(mnprev 900 890 CATCHING_UP)" "{\"rpc\":\"http://127.0.0.1:$((hcport + 1))\"}"
 for m in stalled ready; do
   python3 -I "$HERE/mock_midnight_rpc.py" "$hcport" "$m" & HCPIDS+=($!); PIDS+=($!)
   ( sleep 1; "$HC" --checks midnight --midnight-rpc "http://127.0.0.1:$hcport" --count 1 --out-dir "$WORK/hc-mn-$m" > "$WORK/hc-mn-$m.out" 2>&1; echo $? > "$WORK/hc-mn-$m.rc" ) &

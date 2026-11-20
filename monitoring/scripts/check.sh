@@ -2,7 +2,7 @@
 # Offline checks for monitoring/ (no running stack needed; uses the pinned images):
 #   1. promtool check config  (prometheus.yml + rule files it loads)
 #   2. promtool check rules   (syntax + lint)
-#   3. promtool test rules    (unit tests, run 5 times: startup, catch-up, stalls, disk, failed scrapes)
+#   3. promtool test rules    (unit tests, run 5 times: startup, catch-up, stalls, disk, failed scrapes, missing metrics)
 #   4. amtool check-config    (Alertmanager routes, receivers, inhibitions)
 #   5. dashboard: valid JSON, datasource uid matches provisioning, every PromQL expression parses
 #   6. docker compose config  (compose file is valid)
@@ -77,7 +77,16 @@ if [[ "${1:-}" == "--mutations" ]]; then
   mutate "behind-tip ignores major sync" 'expr: midnight:blocks_behind > 20 and on (job, instance) max by (job, instance) (substrate_sub_libp2p_is_major_syncing) == 0' 'expr: midnight:blocks_behind > 20'
   mutate "failed scrapes not alerted" 'expr: up{job=~"cardano-node|cardano-db-sync|midnight-node|node-exporter"} == 0' 'expr: up{job=~"none"} == 0'
   mutate "missing node-exporter target not alerted" ' or absent(up{job="node-exporter"})' ''
-  mutate "missing metric with a working scrape not alerted" 'unless on (job, instance) (cardano_db_sync_db_slot_height > 0)' 'unless on (job, instance) up'
+  mutate "missing metric with a working scrape not alerted" $'               (cardano_db_sync_db_slot_height > 0)\n' $'               up\n'
+  mutate "db-sync node_block_height not required" $'\n               and on (job, instance) cardano_db_sync_node_block_height' ''
+  mutate "db-sync db_block_height not required" $'\n               and on (job, instance) cardano_db_sync_db_block_height' ''
+  mutate "midnight finalized height not required" $'\n               and on (job, instance) substrate_block_height{status="finalized"}' ''
+  mutate "midnight sync_target height not required" $'\n               and on (job, instance) substrate_block_height{status="sync_target"}' ''
+  mutate "midnight major-syncing flag not required" $'\n               and on (job, instance) substrate_sub_libp2p_is_major_syncing' ''
+  mutate "node-exporter metric check without the disk alerts' fstype filter" \
+    $'node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}\n               and on (job, instance, mountpoint, device) node_filesystem_size_bytes{mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}' \
+    $'node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker"}\n               and on (job, instance, mountpoint, device) node_filesystem_size_bytes{mountpoint=~"/|/var/lib/docker"}'
+  mutate "node-exporter size metric not required" $'\n               and on (job, instance, mountpoint, device) node_filesystem_size_bytes{mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}' ''
   mutate "disk page floor 1 GB instead of 12 GB" '< 12e9)' '< 1e9)'
   mutate "24 h disk prediction without the 3 h history guard" ' and node:chain_fs_history_seconds >= 10800' ''
   mutate "a db-sync slot of 0 counted as a real slot" '(cardano_db_sync_db_slot_height > 0) + scalar' 'cardano_db_sync_db_slot_height + scalar'
