@@ -9,6 +9,8 @@
 #     --stack tf:PREFIX    a Terraform-built stack: containers PREFIX-{cardano-node,postgres,
 #                          cardano-db-sync}, e.g. tf:mn-preprod (infra/ output dbsync_readiness_check)
 #     --network NAME       preprod (default) | preview | mainnet: selects cardano-cli's network magic
+#     --json FILE          also write a machine-readable summary (samples, checks, result) to FILE,
+#                          on every exit path including errors; used by scripts/health-check.sh
 #
 # Exit codes (shared with scripts/midnight-height-check.sh):
 #   0 READY        caught up and still advancing; Midnight may start
@@ -28,13 +30,14 @@ LOG_WINDOW=15m         # window for the "no errors" check
 RETRIES="${DBSYNC_RETRIES:-3}"
 RETRY_DELAY="${DBSYNC_RETRY_DELAY:-5}"
 
-usage() { echo "usage: $0 [--advance SECONDS] [--stack compose|tf:PREFIX] [--network preprod|preview|mainnet]" >&2; exit 2; }
-advance=0 stack=compose network=preprod
+usage() { echo "usage: $0 [--advance SECONDS] [--stack compose|tf:PREFIX] [--network preprod|preview|mainnet] [--json FILE]" >&2; exit 2; }
+advance=0 stack=compose network=preprod json=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --advance) advance="${2:-}"; [[ "$advance" =~ ^[0-9]+$ && "$advance" -gt 0 ]] || usage; shift 2 ;;
     --stack)   stack="${2:-}"; [[ "$stack" == compose || "$stack" =~ ^tf:[a-z0-9][a-z0-9-]*$ ]] || usage; shift 2 ;;
     --network) network="${2:-}"; shift 2 ;;
+    --json)    json="${2:-}"; [[ -n "$json" ]] || usage; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -44,6 +47,22 @@ case "$network" in
   mainnet) magic=(--mainnet) ;;
   *) usage ;;
 esac
+
+# ---- machine-readable summary (--json) ----------------------------------------------------------
+SAMPLES_JSON="[]" CHECKS_JSON="[]" WARNINGS_JSON="[]"
+emit_json() {  # $1=RESULT (READY|CATCHING_UP|FAULT|UNCONFIRMED|ERROR) $2=exit code $3=message
+  [[ -z "$json" ]] && return 0
+  local tmp="$json.tmp.$$"
+  jq -n --arg result "$1" --argjson exit "$2" --arg message "$3" --arg stack "$stack" --arg network "$network" \
+        --argjson advance "$advance" --arg at "$(date -u +%FT%TZ)" \
+        --argjson samples "$SAMPLES_JSON" --argjson checks "$CHECKS_JSON" --argjson warnings "$WARNINGS_JSON" \
+        '{check: "dbsync", schema: 1, generated_at: $at, stack: $stack, network: $network, advance_s: $advance,
+          result: $result, exit_code: $exit, message: $message, samples: $samples, checks: $checks, warnings: $warnings}' \
+    > "$tmp" && mv -f "$tmp" "$json"
+}
+fail_error() {  # $1=message: report ERROR (exit 2) on stderr and in the JSON
+  echo "error: $1" >&2; emit_json ERROR 2 "$1"; exit 2
+}
 
 # Stack adapters: the same checks run against the compose stack or a Terraform-built one.
 #   svc_running SVC / svc_exec SVC CMD... / svc_logs SVC   (SVC = cardano-node|postgres|cardano-db-sync)
@@ -64,8 +83,7 @@ echo "# stack=$stack network=$network"
 
 for svc in cardano-node postgres cardano-db-sync; do
   if ! svc_running "$svc"; then
-    echo "error: $(where "$svc") is not running" >&2
-    exit 2
+    fail_error "$(where "$svc") is not running"
   fi
 done
 
@@ -87,17 +105,24 @@ read_once() {
   row="$(psql_q "SELECT block_no, slot_no, epoch_no, to_char(time, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
                         floor(EXTRACT(epoch FROM (now() AT TIME ZONE 'UTC') - time))::bigint
                  FROM block WHERE block_no IS NOT NULL ORDER BY id DESC LIMIT 1;")" \
-    || { echo "error: query against db-sync database failed" >&2; exit 2; }
-  [[ -n "$row" ]] || { echo "error: db-sync has not inserted any block yet" >&2; exit 2; }
+    || fail_error "query against db-sync database failed"
+  [[ -n "$row" ]] || fail_error "db-sync has not inserted any block yet"
   IFS='|' read -r DB_BLOCK DB_SLOT DB_EPOCH DB_TIME DB_LAG <<<"$row"
 
   tip="$(svc_exec cardano-node cardano-cli query tip "${magic[@]}" --socket-path /ipc/node.socket)" \
-    || { echo "error: cardano-node did not answer 'query tip'" >&2; exit 2; }
+    || fail_error "cardano-node did not answer 'query tip'"
   NODE_BLOCK="$(jq -r '.block' <<<"$tip")"
   NODE_PROGRESS="$(jq -r '.syncProgress' <<<"$tip")"
   [[ "$NODE_BLOCK" =~ ^[0-9]+$ && "$DB_BLOCK" =~ ^[0-9]+$ ]] \
-    || { echo "error: unexpected reading (node block '$NODE_BLOCK', db-sync block '$DB_BLOCK')" >&2; exit 2; }
+    || fail_error "unexpected reading (node block '$NODE_BLOCK', db-sync block '$DB_BLOCK')"
   GAP=$(( NODE_BLOCK - DB_BLOCK ))
+}
+
+record_sample() {  # appends the current reading to the JSON samples
+  SAMPLES_JSON="$(jq -c --arg ts "$TS" --argjson db_block "$DB_BLOCK" --argjson db_slot "$DB_SLOT" --argjson epoch "$DB_EPOCH" \
+    --arg block_time "$DB_TIME" --argjson lag_s "$DB_LAG" --argjson node_block "$NODE_BLOCK" --arg sync_progress "$NODE_PROGRESS" \
+    --argjson gap "$GAP" '. + [{ts: $ts, db_block: $db_block, db_slot: $db_slot, epoch: $epoch, block_time: $block_time,
+      lag_s: $lag_s, node_block: $node_block, sync_progress: ($sync_progress | tonumber), gap: $gap}]' <<<"$SAMPLES_JSON")"
 }
 
 print_reading() {
@@ -112,23 +137,28 @@ sample() {
   local attempt
   for ((attempt = 1; attempt <= RETRIES; attempt++)); do
     read_once
-    if (( GAP >= 0 )); then print_reading; return; fi
+    if (( GAP >= 0 )); then print_reading; record_sample; return; fi
     if (( attempt < RETRIES )); then
       print_reading "  <- db-sync ahead of node, retry $attempt/$((RETRIES - 1)) in ${RETRY_DELAY}s"
       sleep "$RETRY_DELAY"
     else
       print_reading "  <- db-sync still ahead after $RETRIES readings"
+      record_sample
       AHEAD_PERSISTED=1
     fi
   done
 }
 
 faults=() pending=() warnings=()
+record_check() {  # $1=status $2=label $3=detail
+  CHECKS_JSON="$(jq -c --arg st "$1" --arg label "$2" --arg detail "$3" \
+    '. + [{id: ($label | split(" ")[0]), label: ($label | sub("^[0-9]+ "; "")), status: $st, detail: $detail}]' <<<"$CHECKS_JSON")"
+}
 check() {  # $1=kind (fault|pending) $2=label $3=detail $4...=test; runs inside "if" so set -e can't abort
   local kind="$1" label="$2" detail="$3"; shift 3
-  if "$@"; then echo "PASS  $label  ($detail)"; return; fi
-  if [[ "$kind" == fault ]]; then echo "FAULT $label  ($detail)"; faults+=("$label")
-  else echo "WAIT  $label  ($detail)"; pending+=("$label"); fi
+  if "$@"; then echo "PASS  $label  ($detail)"; record_check PASS "$label" "$detail"; return; fi
+  if [[ "$kind" == fault ]]; then echo "FAULT $label  ($detail)"; faults+=("$label"); record_check FAULT "$label" "$detail"
+  else echo "WAIT  $label  ($detail)"; pending+=("$label"); record_check WAIT "$label" "$detail"; fi
 }
 
 sample
@@ -144,8 +174,7 @@ check fault "0 db-sync not ahead of node" "gap=$GAP" [ "$AHEAD_PERSISTED" -eq 0 
 # Read the logs first and check the read itself: a failed read (daemon error, missing container)
 # or an empty window must never be scored as "0 errors".
 if ! dblogs="$(svc_logs cardano-db-sync 2>&1)"; then
-  echo "error: could not read logs of $(where cardano-db-sync): $(head -1 <<<"$dblogs")" >&2
-  exit 2
+  fail_error "could not read logs of $(where cardano-db-sync): $(head -1 <<<"$dblogs")"
 fi
 log_lines="$(grep -c . <<<"$dblogs" || true)"
 errors="$(grep -ciE ':Error:|\bException\b' <<<"$dblogs" || true)"
@@ -157,7 +186,8 @@ else
   # says plainly that "no errors" could not be confirmed. A real stall is check 4's FAULT.
   w="5 no db-sync log lines in last $LOG_WINDOW: absence of errors NOT confirmed"
   if (( advance > 0 )); then w="$w (blocks advanced $first_block -> $DB_BLOCK)"; else w="$w (single sample: run --advance to check progress)"; fi
-  echo "WARN  $w"; warnings+=("$w")
+  echo "WARN  $w"; warnings+=("$w"); record_check WARN "$w" "absence of errors not confirmed"
+  WARNINGS_JSON="$(jq -c --arg w "$w" '. + [$w]' <<<"$WARNINGS_JSON")"
 fi
 if (( advance > 0 )); then
   check fault "4 block_no advanced over ${advance}s" "$first_block@$first_ts -> $DB_BLOCK@$TS" [ "$DB_BLOCK" -gt "$first_block" ]
@@ -166,12 +196,13 @@ fi
 check pending "1 node syncProgress = 100.00" "$NODE_PROGRESS%" [ "$NODE_PROGRESS" = "100.00" ]
 check pending "2 0 <= gap <= $MAX_BLOCK_GAP" "$GAP blocks" test "$GAP" -ge 0 -a "$GAP" -le "$MAX_BLOCK_GAP"
 check pending "3 newest block age < ${MAX_LAG_SECONDS}s" "${DB_LAG}s" [ "$DB_LAG" -lt "$MAX_LAG_SECONDS" ]
-(( advance > 0 )) || echo "SKIP  4 still advancing  (run with --advance 300)"
+(( advance > 0 )) || { echo "SKIP  4 still advancing  (run with --advance 300)"; record_check SKIP "4 still advancing" "single sample"; }
 
 echo
 warn_note=""; (( ${#warnings[@]} )) && warn_note=" [WARNING: ${#warnings[@]}, see WARN lines above]"
 if (( ${#faults[@]} )); then
-  echo "RESULT: FAULT - failed check(s): $(IFS=';'; echo "${faults[*]}")"
+  msg="FAULT - failed check(s): $(IFS=';'; echo "${faults[*]}")"
+  echo "RESULT: $msg"; emit_json FAULT 1 "$msg"
   (( AHEAD_PERSISTED )) && echo "        db-sync has blocks the node doesn't: check for a node restart on an older DB," \
                                "a deep rollback, or db-sync pointed at another node's socket."
   exit 1
@@ -182,11 +213,14 @@ if (( ${#pending[@]} )); then
     rate=", db-sync rate $(( (DB_BLOCK - first_block) * 60 / ($(date -u +%s) - first_epoch_s) )) blocks/min"
   fi
   age="$(( DB_LAG / 86400 ))d $(( DB_LAG % 86400 / 3600 ))h"; (( DB_LAG < 86400 )) && age="${DB_LAG}s"
-  echo "RESULT: CATCHING UP - node at ${NODE_PROGRESS}%, db-sync $GAP blocks behind node, newest block $age old${rate}${warn_note}"
+  msg="CATCHING UP - node at ${NODE_PROGRESS}%, db-sync $GAP blocks behind node, newest block $age old${rate}${warn_note}"
+  echo "RESULT: $msg"; emit_json CATCHING_UP 3 "$msg"
   exit 3
 fi
 if (( advance == 0 )); then
-  echo "RESULT: UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving${warn_note}"
+  msg="UNCONFIRMED - at the tip on one sample; run with --advance 300 to confirm it is still moving${warn_note}"
+  echo "RESULT: $msg"; emit_json UNCONFIRMED 4 "$msg"
   exit 4
 fi
-echo "RESULT: READY - db-sync caught up and advancing; Midnight may start${warn_note}"
+msg="READY - db-sync caught up and advancing; Midnight may start${warn_note}"
+echo "RESULT: $msg"; emit_json READY 0 "$msg"

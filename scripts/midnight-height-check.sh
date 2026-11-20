@@ -2,10 +2,13 @@
 # Classify a Midnight node as READY / CATCHING UP / FAULT from timestamped (UTC) samples of
 # its Substrate JSON-RPC. Criteria and rationale: RUNBOOK.md section 8.2.
 #
-# NOTE: written before the Midnight node was deployed; tested against a mock RPC only
-# (scripts/tests/run-tests.sh).
+# Tested against a mock RPC (scripts/tests/run-tests.sh) and run against the live PreProd node on
+# 2026-11-20 (CATCHING UP; evidence/midnight-height-2026-11-20.txt).
 #
-# Usage: scripts/midnight-height-check.sh [-n SAMPLES] [-i INTERVAL_S] [-o FILE]
+# Usage: scripts/midnight-height-check.sh [-n SAMPLES] [-i INTERVAL_S] [-o FILE] [-j JSON_FILE]
+#   -o FILE   append the human-readable lines to FILE
+#   -j FILE   write a machine-readable summary (samples, faults, result) to FILE, on every exit path
+#             including errors; used by scripts/health-check.sh
 #   env MIDNIGHT_RPC_URL (default http://127.0.0.1:9944)
 #
 # Exit codes (shared with scripts/dbsync-status.sh):
@@ -19,13 +22,14 @@ RPC="${MIDNIGHT_RPC_URL:-http://127.0.0.1:9944}"
 SAMPLES=3
 INTERVAL=60
 OUT=""
+JSON=""
 BLOCK_TIME=6     # seconds, per docs.midnight.network/nodes ("Block time | 6 seconds")
 MAX_TIP_GAP=3    # blocks (~18 s) behind the network's highest block still counts as "at tip"
 
-while getopts "n:i:o:" opt; do
+while getopts "n:i:o:j:" opt; do
   case "$opt" in
-    n) SAMPLES="$OPTARG" ;; i) INTERVAL="$OPTARG" ;; o) OUT="$OPTARG" ;;
-    *) echo "usage: $0 [-n SAMPLES] [-i INTERVAL_S] [-o FILE]" >&2; exit 2 ;;
+    n) SAMPLES="$OPTARG" ;; i) INTERVAL="$OPTARG" ;; o) OUT="$OPTARG" ;; j) JSON="$OPTARG" ;;
+    *) echo "usage: $0 [-n SAMPLES] [-i INTERVAL_S] [-o FILE] [-j JSON_FILE]" >&2; exit 2 ;;
   esac
 done
 [[ "$SAMPLES" =~ ^[0-9]+$ && "$SAMPLES" -ge 3 ]] || { echo "error: -n must be >= 3" >&2; exit 2; }
@@ -35,6 +39,29 @@ done
 if [[ -n "$OUT" ]] && ! { : >> "$OUT"; } 2>/dev/null; then
   echo "error: cannot write to output file '$OUT'" >&2; exit 2
 fi
+
+# ---- machine-readable summary (-j) ---------------------------------------------------------------
+# rpc() exits from a subshell and set -e ends the script, so errors are reported from an EXIT trap:
+# any exit without a recorded result is written as ERROR with its exit code.
+SAMPLES_JSON="[]" RESULT="" MESSAGE=""
+# shellcheck disable=SC2317  # invoked via the EXIT trap
+emit_json() {  # $1=exit code
+  [[ -z "$JSON" ]] && return 0
+  local result="${RESULT:-ERROR}" message="$MESSAGE"
+  [[ -n "$message" ]] || message="ERROR - no result (exit $1): RPC unreachable or invalid response at $RPC, or bad arguments"
+  local uniq_faults="[]"
+  (( ${#faults[@]} )) && uniq_faults="$(printf '%s\n' "${faults[@]}" | awk '!seen[$0]++' | jq -R . | jq -sc .)"
+  jq -n --arg result "$result" --argjson exit "$1" --arg message "$message" --arg rpc "$RPC" --arg at "$(date -u +%FT%TZ)" \
+        --argjson samples_n "$SAMPLES" --argjson interval "$INTERVAL" --argjson samples "$SAMPLES_JSON" --argjson faults "$uniq_faults" \
+        '{check: "midnight", schema: 1, generated_at: $at, rpc: $rpc, samples_requested: $samples_n, interval_s: $interval,
+          result: $result, exit_code: $exit, message: $message, samples: $samples, faults: $faults}' > "$JSON.tmp.$$" \
+    && mv -f "$JSON.tmp.$$" "$JSON"
+}
+faults=()
+trap 'emit_json $?' EXIT
+result() {  # $1=RESULT $2=exit code $3=message: print, record for the JSON, exit
+  RESULT="$1" MESSAGE="$3"; log "RESULT: ${3}"; exit "$2"
+}
 
 rpc() {  # $1=method $2=params-json
   curl -fsS --max-time 10 -H 'Content-Type: application/json' \
@@ -49,7 +76,6 @@ hex2dec() { printf '%d' "$1"; }
 min_advance=$(( INTERVAL / BLOCK_TIME / 2 ))
 
 declare -a best fin high gapv sync_flag epoch_s
-faults=()
 log() { echo "$1"; [[ -n "$OUT" ]] && echo "$1" >> "$OUT"; return 0; }
 
 log "# midnight-height-check rpc=$RPC samples=$SAMPLES interval=${INTERVAL}s min_advance=$min_advance"
@@ -76,6 +102,10 @@ for ((s = 0; s < SAMPLES; s++)); do
   else gapv[s]=$(( high[s] - best[s] )); fi
   peers="$(jq -r '.peers' <<<"$health")"
   sync_flag[s]="$(jq -r '.isSyncing' <<<"$health")"
+  SAMPLES_JSON="$(jq -c --arg ts "$ts" --argjson best "${best[s]}" --argjson fin "${fin[s]}" --argjson high "${high[s]}" \
+    --argjson gap "${gapv[s]}" --argjson peers "$peers" --arg syncing "${sync_flag[s]}" \
+    '. + [{ts: $ts, best: $best, finalized: $fin, highest: (if $high < 0 then null else $high end),
+           gap: (if $gap < 0 then null else $gap end), peers: $peers, is_syncing: ($syncing == "true")}]' <<<"$SAMPLES_JSON")"
   log "$ts ${best[s]} ${fin[s]} $( (( high[s] >= 0 )) && echo "${high[s]}" || echo unknown) $( (( gapv[s] >= 0 )) && echo "${gapv[s]}" || echo "?") $peers ${sync_flag[s]}"
 
   if (( s > 0 )); then
@@ -109,11 +139,10 @@ fi
 
 if (( ${#faults[@]} )); then
   # Unique reasons, in first-seen order (a stall is reported once per interval above).
-  log "RESULT: FAULT - $(printf '%s\n' "${faults[@]}" | awk '!seen[$0]++' | paste -sd, - | sed 's/,/, /g')"; exit 1
+  result FAULT 1 "FAULT - $(printf '%s\n' "${faults[@]}" | awk '!seen[$0]++' | paste -sd, - | sed 's/,/, /g')"
 fi
 if (( at_tip )); then
-  log "RESULT: READY - at tip (${gapv[last]} behind highest ${high[last]}), not syncing, finalized ${fin[0]} -> ${fin[last]}"
-  exit 0
+  result READY 0 "READY - at tip (${gapv[last]} behind highest ${high[last]}), not syncing, finalized ${fin[0]} -> ${fin[last]}"
 fi
 
 # Catching up: explain why not ready and estimate time to tip.
@@ -126,5 +155,4 @@ else
   eta=""
   (( closed > 0 && elapsed > 0 )) && eta=", ETA ~$(( gapv[last] * elapsed / closed / 60 )) min at $(( closed * 60 / elapsed )) blocks/min net"
 fi
-log "RESULT: CATCHING UP - $why$eta"
-exit 3
+result CATCHING_UP 3 "CATCHING UP - $why$eta"

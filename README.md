@@ -4,7 +4,7 @@
 |---|---|---|
 | 1. Node setup (Cardano node + DB Sync on PreProd) | [`RUNBOOK.md`](RUNBOOK.md), [`compose-partner-chains.yml`](compose-partner-chains.yml), [`infra/live/preprod-midnight/`](infra/live/preprod-midnight/), [`evidence/`](evidence/) | Cardano node and DB Sync are synced and **READY**. Midnight node deployed; it **imported and finalized blocks** but has **not finished syncing** and is **paused** (details below) |
 | 2. Monitoring and alerting | [`monitoring/`](monitoring/), summary below | Running against the live stack |
-| 3. Automation (node health checker, option C) | [`scripts/`](scripts/) | `dbsync-status.sh`, `midnight-height-check.sh` + 33 scenario tests |
+| 3. Automation (option C: node health checker) | [`scripts/health-check.sh`](scripts/health-check.sh), usage below | Polling, JSON reports, comparison with the previous report; 49 scenario tests; run live |
 | 4. Security and key management | [`SECURITY.md`](SECURITY.md) | Written |
 | 5. Infrastructure as code | [`infra/`](infra/) | Terraform + CI, green: [run 44578932929](https://github.com/coding-ninja-afk/midnight-node-docker/actions/runs/44578932929) |
 
@@ -81,3 +81,97 @@ staleness rules read. Separate pages cover:
 
 The webhook is a **placeholder** for now (`alertmanager.yml`): alerts are visible in Alertmanager
 and Grafana, but nothing is delivered until a real receiver is configured.
+
+## Section 3: node health checker (option C)
+
+`scripts/health-check.sh` polls the stack on a configurable interval, evaluates its health
+conditions, writes a **JSON report per cycle**, and **compares each report with the previous one**
+to flag regressions. It reuses the two existing checks instead of re-implementing them; both gained
+a `--json`/`-j` output for this:
+
+| Check | Script | What it evaluates |
+|---|---|---|
+| `dbsync` | `scripts/dbsync-status.sh --json` | Cardano node and db-sync: caught up, gap, newest-block age, errors in the logs (RUNBOOK section 7) |
+| `midnight` | `scripts/midnight-height-check.sh -j` | Midnight RPC: best and finalized blocks advancing, peers, gap to the network tip (RUNBOOK section 8.2) |
+
+### Usage
+
+```bash
+scripts/health-check.sh                                   # one cycle, both checks, reports in ./health-reports
+scripts/health-check.sh --count 0 --interval 300          # poll forever, every 5 min (e.g. as a systemd service)
+scripts/health-check.sh --checks dbsync --count 2 --interval 130   # what produced evidence/health-check-2026-11-20/
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--interval S` | 300 | Seconds between cycles |
+| `--count N` | 1 | Cycles to run; `0` = forever |
+| `--out-dir DIR` | `./health-reports` | `report-<UTC>.json` per cycle, plus `latest.json` (a copy of the newest) |
+| `--keep N` | 288 | Keep the newest N reports (one day at 5 min) |
+| `--checks LIST` | `dbsync,midnight` | Which checks to run |
+| `--stack`, `--network` | `compose`, `preprod` | Passed to `dbsync-status.sh` (`tf:mn-preprod` for a Terraform stack) |
+| `--dbsync-advance S` | 0 | Give `dbsync-status.sh` its own `--advance S`. By default it takes one sample per cycle, and progress is judged across reports |
+| `--midnight-rpc URL` | `$MIDNIGHT_RPC_URL` or `http://127.0.0.1:9944` | Midnight RPC endpoint (localhost only on this host) |
+| `--midnight-samples N`, `--midnight-interval S` | 3, 30 | Samples per Midnight check (the minimums that check allows) |
+| `--stall-after S` | 120 | Two reports at least S seconds apart with **no new block** is a regression. db-sync expects ~6 blocks in 120 s, and Midnight ~20 |
+
+**Each report** (`schema: 1`) contains:
+- `generated_at` (UTC) and `cycle`
+- `overall`: the worst *effective* result
+- per check:
+  - the raw `result`, `exit_code` and `message`
+  - its `samples` and individual `checks`
+  - `effective_result`
+- `comparison`:
+  - the previous report and the seconds since it
+  - `regressions[]` and `improvements[]`, each with `check`, `what`, `from` and `to`
+
+**What counts as a regression** (compared with the previous report):
+- **Status got worse:** READY → UNCONFIRMED → CATCHING_UP → FAULT/ERROR, or one failure state
+  became the other.
+- **db-sync:** its block did not advance between reports at least `--stall-after` seconds apart;
+  the gap to the node grew above 5; the newest-block age grew past 300 s; or node sync progress
+  went backwards.
+- **Midnight:** the best or finalized block did not advance between reports; peers dropped to 0;
+  or the gap to the network tip grew.
+
+**One sample, confirmed across reports.** A single db-sync sample can only say UNCONFIRMED, because
+it cannot see progress. If the block **advanced** since a previous report at least `--stall-after`
+seconds older, the "still advancing" condition is confirmed and `effective_result` is READY. The
+raw result stays in the report. Two reports only 30 s apart prove nothing either way: no
+confirmation, and no regression.
+
+**Exit code** (of the last cycle):
+
+| Code | Meaning |
+|---|---|
+| 0 | READY, no regressions |
+| 1 | a FAULT, or any regression |
+| 2 | a check could not run, or bad arguments / unwritable or locked out-dir |
+| 3 | catching up or unconfirmed, nothing got worse |
+
+**Robustness:**
+- Reports are written atomically, and only one poller may use an out-dir (`flock`).
+- A check that crashes without output is recorded as ERROR, together with its output.
+- An unreadable previous report is noted and skipped. It used to replace `latest.json` with an empty
+  file: the tests caught that, and it's fixed.
+- A cycle whose report cannot be built writes nothing and exits 2.
+
+**Tested** with `scripts/tests/run-tests.sh` (49 scenarios, run in CI), against the fake `docker`
+and the mock Midnight RPC:
+- first report
+- advance confirmed across reports
+- db-sync stalled across reports
+- too soon to judge
+- READY → FAULT
+- service down (ERROR)
+- corrupt previous report
+- 3 polling cycles with `--keep 2` rotation
+- a locked out-dir and an unwritable out-dir
+- bad arguments
+- Midnight stalled against a READY report (status, best and finalized regressions)
+- Midnight READY against a CATCHING_UP report (improvement only)
+
+**Live run (2026-11-20):** cycle 1 UNCONFIRMED, then cycle 2 **READY** ("still advancing confirmed
+across reports (130 s)"), exit 0, no regressions (`evidence/health-check-2026-11-20/`). The
+Midnight check was not run live, because the node is paused (Section 1).

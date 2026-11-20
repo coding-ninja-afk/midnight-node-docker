@@ -131,6 +131,102 @@ for bad in "--stack tf:" "--stack nope" "--network testnet"; do
   if [[ $rc == 2 ]]; then echo "ok    dbsync/bad_args '$bad'  (exit 2)"; pass=$((pass+1)); else echo "FAIL  dbsync/bad_args '$bad' exit $rc"; fail=$((fail+1)); fi
 done
 
+# ---------- health-check.sh (Option C): reports, comparison, regressions ----------
+HC="$SCRIPTS/health-check.sh"
+hc_ok() { echo "ok    health/$1  ($2)"; pass=$((pass+1)); }
+hc_fail() { echo "FAIL  health/$1  $2"; sed 's/^/        /' "${3:-/dev/null}"; fail=$((fail+1)); }
+# A previous report "N seconds ago" with the given check object (raw JSON).
+plant_prev() {  # $1=out-dir $2=seconds ago $3=check name $4=check json
+  mkdir -p "$1"; local e=$(( $(date +%s) - $2 ))
+  jq -n --argjson e "$e" --arg c "$3" --argjson chk "$4" \
+    '{schema: 1, generated_at: ($e | todate), generated_epoch: $e, cycle: 1, overall: $chk.result, report_file: "report-planted.json",
+      checks: {($c): ($chk + {effective_result: $chk.result})}, comparison: {regressions: [], improvements: []}}' > "$1/latest.json"
+}
+hc_db() {  # $1=name; runs health-check (dbsync only) with fake docker on $D; out-dir $WORK/hc-$1
+  PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" DBSYNC_RETRY_DELAY=0 "$HC" --checks dbsync --count 1 --out-dir "$WORK/hc-$1" > "$WORK/hc-$1.out" 2>&1
+}
+dbprev() { jq -nc --argjson b "$1" --arg r "${2:-UNCONFIRMED}" '{check: "dbsync", result: $r, exit_code: 4, samples: [{db_block: $b, gap: 0, lag_s: 20, sync_progress: 100, node_block: $b}]}'; }
+
+newcase hc_first; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"
+hc_db first; rc=$?; R="$WORK/hc-first/latest.json"
+if [[ $rc == 3 ]] && jq -e '.schema == 1 and .overall == "UNCONFIRMED" and .checks.dbsync.samples[0].db_block == 1000
+     and (.checks.dbsync.checks | length) == 6 and .comparison.note == "first report in this directory"' "$R" >/dev/null \
+   && [[ $(find "$WORK/hc-first" -name 'report-*.json' | wc -l) == 1 ]]; then hc_ok first_report "exit 3, JSON shape, 1 report + latest.json"
+else hc_fail first_report "exit $rc" "$WORK/hc-first.out"; fi
+
+newcase hc_confirmed; row 1030 20 > "$D/db_rows"; tip 1031 100.00 > "$D/node_tips"; plant_prev "$WORK/hc-confirmed" 600 dbsync "$(dbprev 1000)"
+hc_db confirmed; rc=$?; R="$WORK/hc-confirmed/latest.json"
+if [[ $rc == 0 ]] && jq -e '.overall == "READY" and .checks.dbsync.result == "UNCONFIRMED" and .checks.dbsync.effective_result == "READY"
+     and (.comparison.regressions | length) == 0' "$R" >/dev/null; then hc_ok advance_confirmed_across_reports "1000 -> 1030 over 600 s: effective READY, exit 0"
+else hc_fail advance_confirmed_across_reports "exit $rc" "$WORK/hc-confirmed.out"; fi
+
+newcase hc_stalled; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; plant_prev "$WORK/hc-stalled" 600 dbsync "$(dbprev 1000)"
+hc_db stalled; rc=$?; R="$WORK/hc-stalled/latest.json"
+if [[ $rc == 1 ]] && jq -e '.checks.dbsync.effective_result == "UNCONFIRMED"
+     and any(.comparison.regressions[]; .what == "db-sync block did not advance between reports" and .from == 1000 and .to == 1000)' "$R" >/dev/null
+then hc_ok stalled_across_reports "block 1000 -> 1000 over 600 s: regression, exit 1"; else hc_fail stalled_across_reports "exit $rc" "$WORK/hc-stalled.out"; fi
+
+newcase hc_short; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; plant_prev "$WORK/hc-short" 30 dbsync "$(dbprev 1000)"
+hc_db short; rc=$?; R="$WORK/hc-short/latest.json"
+if [[ $rc == 3 ]] && jq -e '(.comparison.regressions | length) == 0 and .checks.dbsync.effective_result == "UNCONFIRMED"' "$R" >/dev/null
+then hc_ok too_soon_to_judge "no new block after only 30 s (< --stall-after 120): no regression, not confirmed"; else hc_fail too_soon_to_judge "exit $rc" "$WORK/hc-short.out"; fi
+
+newcase hc_fault; row 1040 20 > "$D/db_rows"; tip 1041 100.00 > "$D/node_tips"; echo '[db-sync-node:Error:151] runDbThread: Error SNErrDbSessionErr' > "$D/logs"
+plant_prev "$WORK/hc-fault" 600 dbsync "$(dbprev 1000 READY)"
+hc_db fault; rc=$?; R="$WORK/hc-fault/latest.json"
+if [[ $rc == 1 ]] && jq -e '.overall == "FAULT" and any(.comparison.regressions[]; .what == "status" and .from == "READY" and .to == "FAULT")' "$R" >/dev/null
+then hc_ok status_regression "READY -> FAULT flagged, exit 1"; else hc_fail status_regression "exit $rc" "$WORK/hc-fault.out"; fi
+
+newcase hc_down; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; echo "-postgres" > "$D/down"
+PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$HC" --checks dbsync --stack tf:mn-preprod --count 1 --out-dir "$WORK/hc-down" > "$WORK/hc-down.out" 2>&1; rc=$?
+if [[ $rc == 2 ]] && jq -e '.overall == "ERROR" and (.checks.dbsync.message | test("mn-preprod-postgres.*not running"))' "$WORK/hc-down/latest.json" >/dev/null
+then hc_ok check_error "postgres down: ERROR with the check's message, exit 2"; else hc_fail check_error "exit $rc" "$WORK/hc-down.out"; fi
+
+newcase hc_corrupt; row 1000 20 > "$D/db_rows"; tip 1001 100.00 > "$D/node_tips"; mkdir -p "$WORK/hc-corrupt"; echo '{not json' > "$WORK/hc-corrupt/latest.json"
+hc_db corrupt; rc=$?
+if [[ $rc == 3 ]] && jq -e '.comparison.note | test("unreadable")' "$WORK/hc-corrupt/latest.json" >/dev/null
+then hc_ok corrupt_previous "unreadable previous report noted, not fatal"; else hc_fail corrupt_previous "exit $rc" "$WORK/hc-corrupt.out"; fi
+
+newcase hc_rotate; for i in 1 2 3; do row $((1000 + i * 10)) 20; done > "$D/db_rows"; for i in 1 2 3; do tip $((1001 + i * 10)) 100.00; done > "$D/node_tips"
+PATH="$HERE/fake-docker:$PATH" FAKE_DIR="$D" "$HC" --checks dbsync --count 3 --interval 1 --keep 2 --out-dir "$WORK/hc-rotate" > "$WORK/hc-rotate.out" 2>&1; rc=$?
+n=$(find "$WORK/hc-rotate" -name 'report-*.json' | wc -l); cyc=$(jq .cycle "$WORK/hc-rotate/latest.json")
+if [[ $n == 2 && $cyc == 3 && $(grep -c 'cycle=' "$WORK/hc-rotate.out") == 3 ]]; then hc_ok polling_and_rotation "3 cycles at 1 s, --keep 2 left 2 reports, latest = cycle 3"
+else hc_fail polling_and_rotation "reports=$n latest_cycle=$cyc exit=$rc" "$WORK/hc-rotate.out"; fi
+
+mkdir -p "$WORK/hc-locked"; ( flock 9; sleep 5 ) 9>"$WORK/hc-locked/.lock" & lockpid=$!; sleep 0.5
+"$HC" --checks dbsync --out-dir "$WORK/hc-locked" > "$WORK/hc-locked.out" 2>&1; rc=$?; wait "$lockpid" 2>/dev/null
+if [[ $rc == 2 ]] && grep -q "already writing" "$WORK/hc-locked.out"; then hc_ok locked_out_dir "second poller on the same dir refused, exit 2"; else hc_fail locked_out_dir "exit $rc" "$WORK/hc-locked.out"; fi
+"$HC" --out-dir /proc/no-such-dir > "$WORK/hc-ro.out" 2>&1; rc=$?
+if [[ $rc == 2 ]] && grep -q "cannot write" "$WORK/hc-ro.out"; then hc_ok unwritable_out_dir "exit 2"; else hc_fail unwritable_out_dir "exit $rc" "$WORK/hc-ro.out"; fi
+for bad in "--interval x" "--checks dbsync,foo" "--keep 0" "--bogus"; do
+  # shellcheck disable=SC2086  # word splitting of $bad is intended
+  "$HC" $bad --out-dir "$WORK/hc-bad" >/dev/null 2>&1; rc=$?
+  if [[ $rc == 2 ]]; then hc_ok "bad_args '$bad'" "exit 2"; else hc_fail "bad_args '$bad'" "exit $rc"; fi
+done
+
+# Midnight through the mock RPC (each run takes ~60 s: 3 samples, 30 s apart); both in parallel.
+hcport=18990; HCPIDS=()
+mnprev() { jq -nc --argjson b "$1" --argjson f "$2" --arg r "$3" '{check: "midnight", result: $r, exit_code: 0, samples: [{best: $b, finalized: $f, highest: ($b + 1), gap: 1, peers: 8, is_syncing: false}]}'; }
+plant_prev "$WORK/hc-mn-stalled" 600 midnight "$(mnprev 5000 4998 READY)"
+plant_prev "$WORK/hc-mn-ready" 600 midnight "$(mnprev 900 890 CATCHING_UP)"
+for m in stalled ready; do
+  python3 -I "$HERE/mock_midnight_rpc.py" "$hcport" "$m" & HCPIDS+=($!); PIDS+=($!)
+  ( sleep 1; "$HC" --checks midnight --midnight-rpc "http://127.0.0.1:$hcport" --count 1 --out-dir "$WORK/hc-mn-$m" > "$WORK/hc-mn-$m.out" 2>&1; echo $? > "$WORK/hc-mn-$m.rc" ) &
+  HCPIDS+=($!); hcport=$((hcport + 1))
+done
+deadline=$(( $(date +%s) + 150 ))
+for m in stalled ready; do while [[ ! -s "$WORK/hc-mn-$m.rc" ]] && (( $(date +%s) < deadline )); do sleep 1; done; done
+rc=$(cat "$WORK/hc-mn-stalled.rc" 2>/dev/null); R="$WORK/hc-mn-stalled/latest.json"
+if [[ "$rc" == 1 ]] && jq -e '.overall == "FAULT"
+     and any(.comparison.regressions[]; .what == "status" and .from == "READY" and .to == "FAULT")
+     and any(.comparison.regressions[]; .what == "best block did not advance between reports" and .from == 5000)
+     and any(.comparison.regressions[]; .what == "finalized block did not advance between reports")' "$R" >/dev/null
+then hc_ok midnight_regressions "mock stalled vs READY 600 s ago: status, best, finalized flagged, exit 1"; else hc_fail midnight_regressions "exit $rc" "$WORK/hc-mn-stalled.out"; fi
+rc=$(cat "$WORK/hc-mn-ready.rc" 2>/dev/null); R="$WORK/hc-mn-ready/latest.json"
+if [[ "$rc" == 0 ]] && jq -e '.overall == "READY" and (.comparison.regressions | length) == 0
+     and any(.comparison.improvements[]; .from == "CATCHING_UP" and .to == "READY") and (.checks.midnight.samples | length) == 3' "$R" >/dev/null
+then hc_ok midnight_improvement "mock ready vs CATCHING_UP: improvement only, exit 0"; else hc_fail midnight_improvement "exit $rc" "$WORK/hc-mn-ready.out"; fi
+
 # ---------- midnight-height-check.sh ----------
 port=18950
 declare -A MODES=(

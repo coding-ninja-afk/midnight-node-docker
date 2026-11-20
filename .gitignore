@@ -23,3 +23,6 @@ crash.log
 host.auto.tfvars
 # Plan/target guard records (host paths, daemon ID): deployment records, not source
 *-target.txt
+
+# Default output of scripts/health-check.sh (evidence copies live in evidence/)
+health-reports/
