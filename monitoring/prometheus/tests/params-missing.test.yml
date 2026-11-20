@@ -1,0 +1,124 @@
+# promtool unit test: the network params file is NOT loaded (rule_files lists only the alert rules).
+# Tip ages cannot be computed, so MonitoringParamsMissing must page.
+rule_files:
+- ../rules/midnight-fno.rules.yml
+evaluation_interval: '1m'
+tests:
+- interval: '1m'
+  name: 'network params file not loaded: tip ages cannot be computed'
+  input_series:
+  - series: 'up{job="cardano-node",instance="cardano-node:12799"}'
+    values: 1x120
+  - series: 'up{job="cardano-db-sync",instance="cardano-db-sync:8080"}'
+    values: 1x120
+  - series: 'up{job="node-exporter",instance="node-exporter:9100"}'
+    values: 1x120
+  - series: 'up{job="midnight-node",instance="midnight-node:9615"}'
+    values: 1x120
+  - series: 'cardano_node_metrics_slotNum_int{job="cardano-node",instance="cardano-node:12799"}'
+    values: 100000+60x120
+  - series: 'cardano_db_sync_db_slot_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}'
+    values: 100000+60x120
+  - series: 'cardano_db_sync_db_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}'
+    values: 5000+3x120
+  - series: 'cardano_db_sync_node_block_height{job="cardano-db-sync",instance="cardano-db-sync:8080"}'
+    values: 5000+3x120
+  - series: 'substrate_block_height{status="best",job="midnight-node",instance="midnight-node:9615"}'
+    values: 1000+10x120
+  - series: 'substrate_block_height{status="finalized",job="midnight-node",instance="midnight-node:9615"}'
+    values: 998+10x120
+  - series: 'substrate_block_height{status="sync_target",job="midnight-node",instance="midnight-node:9615"}'
+    values: 1001+10x120
+  - series: 'substrate_sub_libp2p_is_major_syncing{job="midnight-node",instance="midnight-node:9615"}'
+    values: '0x120'
+  - series: 'node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}'
+    values: 60000000000x120
+  - series: 'node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",mountpoint="/",fstype="ext4",device="/dev/sda2"}'
+    values: 120000000000x120
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MonitoringParamsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeTipStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CardanoNodeCatchingUp
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DbSyncBehindNode
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBlocksStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightFinalityStalled
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MidnightBehindTip
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: DiskWillFillWithin24h
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetDown
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringTargetMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringMetricsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: MonitoringParamsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        component: monitoring
+      exp_annotations:
+        description: 'cardano:slot_unix_offset_seconds is missing (params-<network>.yml not loaded), so tip ages cannot be computed and the Cardano staleness alerts are silent.'
+        first_response: Make sure exactly one params-<network>.yml is in monitoring/prometheus/rules/ and reload Prometheus.
+        runbook: 'monitoring/README.md#monitoringparamsmissing'
+        summary: Network parameters for the Cardano tip-age rules are not loaded

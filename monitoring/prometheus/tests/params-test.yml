@@ -1,0 +1,8 @@
+# Test network constant: unix_time(slot) = slot - 100000, so in the tests a node at the tip has
+# slot = 100000 + 60 * minute (promtool's time starts at 0).
+groups:
+  - name: network-params
+    rules:
+      - record: cardano:slot_unix_offset_seconds
+        expr: vector(-100000)
+        labels: { network: test }

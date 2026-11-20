@@ -1,0 +1,220 @@
+# Alert rules for the Midnight PreProd FNO stack (Section 2).
+#
+# Design (monitoring/README.md has the full rationale):
+#   - Three things page: Cardano data going stale (Midnight verifies its blocks against it),
+#     Midnight blocks or finality stalling, and chain-data disk running out.
+#   - Monitoring that cannot see is itself an alert: a failed scrape removes the series the
+#     staleness rules read, so `up == 0`, missing targets and missing metrics page separately.
+#   - Startup: rates and deltas need at least two samples in their window, so nothing evaluates
+#     during the first minutes after Prometheus or a node (re)starts; `for:` covers the rest.
+#   - Catch-up: "behind" is only a fault when the tip is NOT moving faster than real time. A node
+#     or db-sync that is far behind but advancing quickly is catching up (info, no page).
+#
+# Thresholds come from the chain's own timing: PreProd makes a block every ~20 s (slots are 1 s,
+# active slot coefficient 0.05), so a 300 s gap occurs by chance ~3 in 10 million; Midnight makes a
+# block every 6 s. Same numbers as the readiness checks in RUNBOOK.md sections 7 and 8.2.
+# Network constants (slot -> unix time) come from params-<network>.yml.
+groups:
+  # ONE group on purpose: rules in a group are evaluated in order, so the alerts below always read
+  # the recording rules' values from the SAME evaluation. With separate groups (evaluated
+  # independently, in no fixed order) an alert sometimes read the previous minute's value: the
+  # promtool tests were flaky (4 of 8 runs) until the groups were merged.
+  - name: midnight-fno
+    rules:
+      # ---- Cardano node ----
+      # A slot of 0 means "not known yet", not slot zero: db-sync reports 0 for ~45 s after a restart
+      # (seen live 2026-11-20 12:17), which read as a tip 4.4 years old and a rate spike lasting the
+      # whole 10 min window. Every slot input therefore ignores zeros (`> 0`); a slot that stays 0 is
+      # MonitoringMetricsMissing.
+      - record: cardano:node_tip_age_seconds
+        expr: time() - (max by (job, instance) (cardano_node_metrics_slotNum_int > 0) + scalar(cardano:slot_unix_offset_seconds))
+      # Slots per second over 10 min: ~1 at the tip, > 1 while catching up (tip age shrinking),
+      # < 1 when falling behind, 0 when stuck. deriv() (least-squares slope) instead of delta():
+      # delta() extrapolates a partly filled window and read 0.23 at the tip right after Prometheus
+      # started; deriv() uses the samples that exist.
+      - record: cardano:node_slot_rate_10m
+        expr: max by (job, instance) (deriv((cardano_node_metrics_slotNum_int > 0)[10m:]))
+
+      # ---- cardano-db-sync ----
+      - record: cardano:dbsync_tip_age_seconds
+        expr: time() - (max by (job, instance) (cardano_db_sync_db_slot_height > 0) + scalar(cardano:slot_unix_offset_seconds))
+      - record: cardano:dbsync_slot_rate_10m
+        expr: max by (job, instance) (deriv((cardano_db_sync_db_slot_height > 0)[10m:]))
+      - record: cardano:dbsync_block_gap
+        expr: max by (job, instance) (cardano_db_sync_node_block_height - cardano_db_sync_db_block_height)
+      # > 0 while db-sync is closing the gap to its node (e.g. catching up after a restart).
+      - record: cardano:dbsync_gap_closing_15m
+        expr: max by (job, instance) (delta(cardano_db_sync_db_block_height[15m]) - delta(cardano_db_sync_node_block_height[15m]))
+
+      # ---- midnight-node (Substrate) ----
+      - record: midnight:best_advance_5m
+        expr: max by (job, instance) (delta(substrate_block_height{status="best"}[5m]))
+      - record: midnight:finalized_advance_10m
+        expr: max by (job, instance) (delta(substrate_block_height{status="finalized"}[10m]))
+      # ---- host ----
+      # How much history the disk series has (capped at 6 h). predict_linear over a few minutes
+      # extrapolates image pulls and log bursts to a whole day: right after Prometheus started it
+      # predicted -471 GB in 24 h and DiskWillFillWithin24h went pending (2026-11-20). The
+      # prediction is only trusted with >= 3 h of history.
+      - record: node:chain_fs_history_seconds
+        expr: time() - min_over_time(timestamp(node_filesystem_avail_bytes{job="node-exporter", mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"})[6h:1m])
+
+      - record: midnight:blocks_behind
+        expr: max by (job, instance) (substrate_block_height{status="sync_target"}) - max by (job, instance) (substrate_block_height{status="best"})
+
+      # ======================= 1. Cardano data stale =======================
+      - alert: CardanoNodeTipStale
+        # Not catching up = tip age not shrinking = slot rate <= 1/s. This includes a node that
+        # still makes progress but slower than the chain (falling further behind); an earlier
+        # "< 0.5" threshold let a node at 0.6 slots/s drift away as "catching up" without paging.
+        expr: cardano:node_tip_age_seconds > 300 and cardano:node_slot_rate_10m <= 1
+        for: 5m
+        labels: { severity: page, component: cardano-node }
+        annotations:
+          summary: "cardano-node tip is {{ $value | humanizeDuration }} old and not catching up"
+          description: "The node's newest block is more than 300 s old and its tip age is not shrinking (slot rate at most 1/s over 10 min): stopped, or progressing slower than the chain and falling further behind. Midnight verifies blocks against this data, so Midnight will stall too."
+          first_response: "1) docker ps / docker logs cardano-node: crashed, restarting, or replaying the ledger? 2) Peers: cardano_node_metrics_peerSelection_Hot_int (0 = network/firewall/DNS). 3) Disk full? (DiskSpaceLow). Do NOT restart midnight-node: it is not the cause."
+          runbook: "monitoring/README.md#cardanonodetipstale"
+
+      - alert: CardanoNodeCatchingUp
+        expr: cardano:node_tip_age_seconds > 300 and cardano:node_slot_rate_10m > 1
+        for: 15m
+        labels: { severity: info, component: cardano-node }
+        annotations:
+          summary: "cardano-node is catching up ({{ $value | humanizeDuration }} behind, advancing)"
+          description: "Behind the chain tip but advancing faster than the chain (slot rate above 1/s), so the tip age is shrinking: initial sync or recovery after downtime. Informational."
+          first_response: "None needed while the tip age keeps falling. If it stops falling, CardanoNodeTipStale fires."
+          runbook: "monitoring/README.md#cardanonodecatchingup"
+
+      - alert: DbSyncStale
+        expr: cardano:dbsync_tip_age_seconds > 600 and cardano:dbsync_slot_rate_10m <= 1
+        for: 5m
+        labels: { severity: page, component: cardano-db-sync }
+        annotations:
+          summary: "db-sync's newest block is {{ $value | humanizeDuration }} old and not catching up"
+          description: "db-sync stopped writing blocks to Postgres, or writes them slower than the chain grows. Midnight reads Cardano data from this database. Inhibited while CardanoNodeTipStale fires (then the node is the cause)."
+          first_response: "1) scripts/dbsync-status.sh (READY/FAULT + reasons). 2) docker logs cardano-db-sync: DB errors, node socket errors. 3) Postgres healthy? (docker ps; its healthcheck reports the reason). 4) Disk full?"
+          runbook: "monitoring/README.md#dbsyncstale"
+
+      - alert: DbSyncBehindNode
+        expr: cardano:dbsync_block_gap > 5 and cardano:dbsync_gap_closing_15m <= 0
+        for: 15m
+        labels: { severity: page, component: cardano-db-sync }
+        annotations:
+          summary: "db-sync is {{ $value }} blocks behind its node and not closing the gap"
+          description: "The node has blocks db-sync has not written, and the gap did not shrink over 15 min (a db-sync catching up after a restart closes it and does not alert)."
+          first_response: "1) docker logs cardano-db-sync: slow inserts, DB errors, rollbacks? 2) Postgres load/disk (iowait, DiskSpaceLow). 3) scripts/dbsync-status.sh --advance 300."
+          runbook: "monitoring/README.md#dbsyncbehindnode"
+
+      # ======================= 2. Midnight blocks / finality =======================
+      - alert: MidnightBlocksStalled
+        expr: midnight:best_advance_5m < 25
+        for: 5m
+        labels: { severity: page, component: midnight-node }
+        annotations:
+          summary: "Midnight best block advanced only {{ $value }} in 5 min (expected ~50)"
+          description: "Midnight makes a block every 6 s; fewer than half the expected blocks for 5 min means the node is not importing. Seen in testing when db-sync data was unusable: imports fail verification, best stays put, peers drop."
+          first_response: "1) substrate_import_queue_processed_total{result=\"verification_failed\"} rising and node logs show db-sync/Postgres errors? -> it is the Cardano data path (CardanoNodeTipStale / DbSync*). 2) Peers = 0 -> P2P/firewall. 3) scripts/midnight-height-check.sh for READY/CATCHING UP/FAULT."
+          runbook: "monitoring/README.md#midnightblocksstalled"
+
+      - alert: MidnightFinalityStalled
+        expr: midnight:finalized_advance_10m == 0
+        for: 5m
+        labels: { severity: page, component: midnight-node }
+        annotations:
+          summary: "Midnight finalized block has not moved for 15 min"
+          description: "GRANDPA finality stopped although it normally trails the best block by a few blocks. Inhibited while MidnightBlocksStalled fires (then blocks are the problem)."
+          first_response: "1) Is it network-wide? Compare with another node / explorer. 2) Node logs for GRANDPA / justification errors; substrate_finality_grandpa_round. 3) If only this node: restart it once; if network-wide: escalate to Midnight operators."
+          runbook: "monitoring/README.md#midnightfinalitystalled"
+
+      - alert: MidnightBehindTip
+        expr: midnight:blocks_behind > 20 and on (job, instance) max by (job, instance) (substrate_sub_libp2p_is_major_syncing) == 0
+        for: 10m
+        labels: { severity: warning, component: midnight-node }
+        annotations:
+          summary: "Midnight node is {{ $value }} blocks behind the network while not syncing"
+          description: "Not in major sync, yet more than 20 blocks (~2 min) behind the best block peers announce, for 10 min."
+          first_response: "1) Peers (substrate_sub_libp2p_peers_count). 2) Import failures (substrate_import_queue_processed_total by result). 3) CPU/disk pressure on the host."
+          runbook: "monitoring/README.md#midnightbehindtip"
+
+      # ======================= 3. Disk =======================
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{job="node-exporter", mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}
+             / node_filesystem_size_bytes{job="node-exporter", mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"} < 0.10)
+          or
+          (node_filesystem_avail_bytes{job="node-exporter", mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"} < 12e9)
+        for: 5m
+        labels: { severity: page, component: host }
+        annotations:
+          summary: "Chain-data filesystem {{ $labels.mountpoint }} is nearly full"
+          description: "Less than 10% or 12 GB free. Postgres and cardano-node crash (and risk corruption) on a full disk; it went from 17 GB to 2.4 GB free in ~3 h during the first sync."
+          first_response: "1) docker system df -v: what grows? 2) Free space safely: docker image prune, trim container logs; never `docker compose down -v` (deletes chain data). 3) Grow the volume. 4) Under ~2 GB: stop db-sync cleanly before Postgres fills the disk."
+          runbook: "monitoring/README.md#diskspacelow"
+
+      - alert: DiskWillFillWithin24h
+        expr: predict_linear(node_filesystem_avail_bytes{job="node-exporter", mountpoint=~"/|/var/lib/docker", fstype!~"tmpfs|overlay|squashfs"}[6h], 86400) < 0 and node:chain_fs_history_seconds >= 10800
+        for: 30m
+        labels: { severity: warning, component: host }
+        annotations:
+          summary: "Chain-data filesystem {{ $labels.mountpoint }} will fill within 24 h at the current rate"
+          description: "Linear prediction over the last 6 h reaches 0 bytes free within a day (only evaluated once at least 3 h of history exist, so restarts and short bursts do not trigger it)."
+          first_response: "Plan the disk growth today (see DiskSpaceLow), find the growth with docker system df -v."
+          runbook: "monitoring/README.md#diskwillfillwithin24h"
+
+      # ======================= Monitoring health: scrapes, targets, metrics =======================
+      - alert: MonitoringTargetDown
+        expr: up{job=~"cardano-node|cardano-db-sync|midnight-node|node-exporter"} == 0
+        for: 5m
+        labels: { severity: page, component: monitoring }
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }})"
+          description: "A failed scrape removes this target's series, so the staleness alerts above CANNOT fire for it: monitoring is blind, not reassuring."
+          first_response: "1) Is the service itself down? docker ps. 2) cardano-node: the cardano-node-metrics sidecar shares the node's network namespace and must be restarted after the node container is recreated (docker compose -f monitoring/compose.yml restart cardano-node-metrics). 3) Network: Prometheus attached to the stack's network?"
+          runbook: "monitoring/README.md#monitoringtargetdown"
+
+      - alert: MonitoringTargetMissing
+        expr: absent(up{job="cardano-node"}) or absent(up{job="cardano-db-sync"}) or absent(up{job="node-exporter"})
+        for: 10m
+        labels: { severity: page, component: monitoring }
+        annotations:
+          summary: "No scrape target for {{ $labels.job }} at all"
+          description: "Prometheus has no target for a job that must always be monitored (config or service discovery broken), so nothing about it can alert."
+          first_response: "Check monitoring/prometheus/prometheus.yml and http://127.0.0.1:9090/targets; reload Prometheus."
+          runbook: "monitoring/README.md#monitoringtargetmissing"
+
+      # Scrape works but the metric the alerts need is gone (renamed in an upgrade, exporter
+      # misconfigured...). cardano-node gets 30 min: after a restart it may replay the ledger before
+      # publishing its slot (note: blockReplayProgress_real stays at 99.995 at the tip, so it cannot
+      # be used to detect a replay).
+      - alert: MonitoringMetricsMissing
+        expr: up{job="cardano-node"} == 1 unless on (job, instance) (cardano_node_metrics_slotNum_int > 0)
+        for: 30m
+        labels: { severity: page, component: monitoring, grace: 30m }
+        annotations:
+          summary: "{{ $labels.job }} is scraped but publishes no slot number"
+          description: "The staleness alerts cannot evaluate for this target. After a restart, a long ledger replay can cause this; otherwise a metric was renamed or disabled."
+          first_response: "1) docker logs cardano-node: replaying the ledger? (then wait). 2) Otherwise compare the scrape output (curl via the sidecar) with the metric names in the rules; an upgrade may have renamed it."
+          runbook: "monitoring/README.md#monitoringmetricsmissing"
+      - alert: MonitoringMetricsMissing
+        expr: |
+          (up{job="cardano-db-sync"} == 1 unless on (job, instance) (cardano_db_sync_db_slot_height > 0))
+          or (up{job="midnight-node"} == 1 unless on (job, instance) substrate_block_height{status="best"})
+          or (up{job="node-exporter"} == 1 unless on (job, instance) node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker"})
+        for: 15m
+        labels: { severity: page, component: monitoring, grace: 15m }
+        annotations:
+          summary: "{{ $labels.job }} is scraped but a metric the alerts need is missing"
+          description: "The scrape succeeds but the series the alerts read is absent (or a slot stays 0, which db-sync reports until it has read its first block), so those alerts cannot fire."
+          first_response: "Compare the target's /metrics output with the metric names in monitoring/prometheus/rules; an upgrade may have renamed one. For node-exporter, check the host root is mounted at /host."
+          runbook: "monitoring/README.md#monitoringmetricsmissing"
+
+      - alert: MonitoringParamsMissing
+        expr: absent(cardano:slot_unix_offset_seconds)
+        for: 5m
+        labels: { severity: page, component: monitoring }
+        annotations:
+          summary: "Network parameters for the Cardano tip-age rules are not loaded"
+          description: "cardano:slot_unix_offset_seconds is missing (params-<network>.yml not loaded), so tip ages cannot be computed and the Cardano staleness alerts are silent."
+          first_response: "Make sure exactly one params-<network>.yml is in monitoring/prometheus/rules/ and reload Prometheus."
+          runbook: "monitoring/README.md#monitoringparamsmissing"

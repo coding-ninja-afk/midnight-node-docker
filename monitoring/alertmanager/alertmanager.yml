@@ -1,0 +1,41 @@
+# Alertmanager for the Midnight PreProd FNO stack.
+# The webhook is a PLACEHOLDER: "*.invalid" is a reserved TLD that never resolves, so nothing is
+# delivered until a real receiver (PagerDuty / Opsgenie / Slack / webhook) replaces it.
+route:
+  receiver: placeholder-webhook
+  group_by: [alertname, job, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+  routes:
+    # info = context only (e.g. CardanoNodeCatchingUp during a planned sync): dashboard, no page
+    - matchers: [ 'severity="info"' ]
+      receiver: "null"
+    - matchers: [ 'severity="warning"' ]
+      receiver: placeholder-webhook
+      repeat_interval: 12h
+    - matchers: [ 'severity="page"' ]
+      receiver: placeholder-webhook
+      repeat_interval: 1h
+
+receivers:
+  - name: "null"
+  - name: placeholder-webhook
+    webhook_configs:
+      - url: "http://alert-receiver.invalid/placeholder"   # PLACEHOLDER: replace before relying on alerts
+        send_resolved: true
+
+# Page on the cause, not on every symptom.
+inhibit_rules:
+  # A stale cardano-node starves db-sync: page for the node only.
+  - source_matchers: [ 'alertname="CardanoNodeTipStale"' ]
+    target_matchers: [ 'alertname=~"DbSyncStale|DbSyncBehindNode"' ]
+    equal: [stack]
+  # Blocks not importing implies no finality: page for blocks only.
+  - source_matchers: [ 'alertname="MidnightBlocksStalled"' ]
+    target_matchers: [ 'alertname=~"MidnightFinalityStalled|MidnightBehindTip"' ]
+    equal: [stack, instance]
+  # A target that cannot be scraped also has "missing metrics": page for the scrape.
+  - source_matchers: [ 'alertname="MonitoringTargetDown"' ]
+    target_matchers: [ 'alertname="MonitoringMetricsMissing"' ]
+    equal: [stack, job, instance]

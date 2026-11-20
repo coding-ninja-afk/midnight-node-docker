@@ -1,0 +1,53 @@
+# Prometheus for the Midnight PreProd FNO stack (Section 2). Mounted read-only at /etc/prometheus.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    stack: midnight-preprod
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # cardano-node 11.0.1 serves Prometheus only on 127.0.0.1:12798 inside its container
+  # ("PrometheusSimple suffix 127.0.0.1 12798" in the image's config). The cardano-node-metrics
+  # sidecar shares the node's network namespace and forwards :12799 -> 127.0.0.1:12798, so the live
+  # node's config is not changed. "cardano-node" is the node's name on the compose network.
+  - job_name: cardano-node
+    static_configs:
+      - targets: ["cardano-node:12799"]
+        labels: { component: cardano-node }
+
+  # cardano-db-sync 13.7.1.0 listens on 0.0.0.0:8080 and serves metrics at "/".
+  - job_name: cardano-db-sync
+    metrics_path: /
+    static_configs:
+      - targets: ["cardano-db-sync:8080"]
+        labels: { component: cardano-db-sync }
+
+  # Host filesystem (chain data lives under /var/lib/docker on the root filesystem here).
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels: { component: host }
+
+  # midnight-node exposes Substrate metrics on :9615 (internal network only). Not deployed on this
+  # host yet, so the target file starts EMPTY: no Midnight alerts until a target is added
+  # (see monitoring/README.md "Adding Midnight"). Once listed, a failed scrape alerts.
+  - job_name: midnight-node
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/midnight-node.yml"]
+        refresh_interval: 1m
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]

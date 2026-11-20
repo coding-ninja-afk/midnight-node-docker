@@ -1,0 +1,6 @@
+CardanoNodeTipStale      midnight-preprod  active      -
+DbSyncBehindNode         midnight-preprod  suppressed  inhibited
+DbSyncStale              midnight-preprod  suppressed  inhibited
+DbSyncStale              other-stack       active      -
+MidnightBlocksStalled    midnight-preprod  active      -
+MidnightFinalityStalled  midnight-preprod  suppressed  inhibited

@@ -1,0 +1,12 @@
+# Network constants for the alert rules. One file per network; load exactly one.
+#
+# PreProd slot -> unix time: systemStart 2022-06-01T00:00:00Z (1654041600); the Byron era was
+# 4 epochs x 21600 slots x 20 s = 1,728,000 s (86,400 slots), then 1 s slots. So
+#   unix_time(slot) = 1654041600 + 1728000 + (slot - 86400) = slot + 1655683200.
+# Checked against the live node on 2026-11-19: computed tip age 7 s at the chain tip.
+groups:
+  - name: network-params
+    rules:
+      - record: cardano:slot_unix_offset_seconds
+        expr: vector(1655683200)
+        labels: { network: preprod }

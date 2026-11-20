@@ -1,0 +1,4 @@
+# Empty until midnight-node runs. Then, e.g.:
+# - targets: ["midnight-node:9615"]
+#   labels: { component: midnight-node }
+[]

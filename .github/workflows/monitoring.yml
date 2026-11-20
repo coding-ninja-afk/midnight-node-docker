@@ -1,0 +1,30 @@
+# Checks for monitoring/ (Section 2): Prometheus config and rules, promtool unit tests (startup,
+# catch-up, stalls, disk, failed scrapes; 5 runs to catch flakiness), rule mutations with a control
+# run, Alertmanager config, dashboard expressions, compose file. No live stack needed.
+name: monitoring
+
+on:
+  pull_request:
+    paths: ["monitoring/**", ".github/workflows/monitoring.yml"]
+  push:
+    branches: [main]
+    paths: ["monitoring/**", ".github/workflows/monitoring.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitoring-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: promtool / amtool / dashboard / mutations
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck
+        run: shellcheck -S style monitoring/scripts/*.sh
+      - name: monitoring checks (pinned Prometheus / Alertmanager images)
+        run: monitoring/scripts/check.sh --mutations

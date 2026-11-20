@@ -1,0 +1,10 @@
+# Live failed-scrape test: stop the cardano-node metrics sidecar, expect MonitoringTargetDown, restart, expect it to clear
+2026-11-20T02:12:11Z before: up{cardano-node}=1 TargetDown=none
+2026-11-20T02:12:11Z sidecar stopped
+2026-11-20T02:12:11Z +0s TargetDown=none up=1 tip_age=94.7739999294281
+2026-11-20T02:12:31Z +20s TargetDown=cardano-node:pending up=0 tip_age=absent (no scrape data)
+2026-11-20T02:17:31Z +320s TargetDown=cardano-node:firing up=0 tip_age=absent (no scrape data)
+2026-11-20T02:17:31Z in Alertmanager: MonitoringTargetDown job=cardano-node severity=page state=active
+2026-11-20T02:18:11Z delivery attempt to the placeholder: msg="Notify for alerts failed"
+2026-11-20T02:18:12Z sidecar started
+2026-11-20T02:18:32Z +20s TargetDown=none up=1

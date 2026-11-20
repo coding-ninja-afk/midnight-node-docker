@@ -1,0 +1,70 @@
+# monitoring/scripts/check.sh --mutations
+# run_utc: 2026-11-20T12:34:40Z  promtool 3.16.0, amtool 0.34.2
+
+
+== promtool check config
+Checking /etc/prometheus/prometheus.yml
+  SUCCESS: 2 rule files found
+ SUCCESS: /etc/prometheus/prometheus.yml is valid prometheus config file syntax
+
+Checking /etc/prometheus/rules/midnight-fno.rules.yml
+  SUCCESS: 24 rules found
+
+Checking /etc/prometheus/rules/params-preprod.yml
+  SUCCESS: 1 rules found
+
+PASS
+
+== promtool check rules
+Checking /p/rules/midnight-fno.rules.yml
+  SUCCESS: 24 rules found
+
+Checking /p/rules/params-preprod.yml
+  SUCCESS: 1 rules found
+
+PASS
+
+== promtool test rules (5 runs: rule-group ordering once made these flaky)
+5/5 runs passed (21 + 1 tests)
+PASS
+
+== amtool check-config
+Checking '/a/alertmanager.yml'  SUCCESS
+Found:
+ - global config
+ - route
+ - 3 inhibit rules
+ - 2 receivers
+ - 0 templates
+
+PASS
+
+== dashboard
+panels: 17; datasource refs not 'prometheus': 0
+expressions parsed: 26 (promtool exit 0)
+PASS
+
+== docker compose config
+PASS
+
+== mutation test (each broken rule must make the unit tests fail)
+control     unmodified copy passes (harness OK)
+caught      catch-up pages as stale (no slot-rate condition)
+caught      falling behind treated as catching up (old 0.5 slots/s threshold)
+caught      db-sync falling behind not paged (old 0.5 slots/s threshold)
+caught      stale threshold 3000 s instead of 300
+caught      db-sync catch-up after restart pages (no gap-closing check)
+caught      midnight stall without for: (startup flap)
+caught      midnight finality alert removed
+caught      behind-tip ignores major sync
+caught      failed scrapes not alerted
+caught      missing node-exporter target not alerted
+caught      missing metric with a working scrape not alerted
+caught      disk page floor 1 GB instead of 12 GB
+caught      24 h disk prediction without the 3 h history guard
+caught      a db-sync slot of 0 counted as a real slot
+caught      params-missing alert removed
+caught      first_response dropped from an alert
+
+RESULT: PASS
+exit=0
