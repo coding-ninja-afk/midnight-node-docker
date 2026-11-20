@@ -1,0 +1,5 @@
+# Copy to host.auto.tfvars (git-ignored) and set absolute paths on the Docker host.
+# Layout and required owners: infra/README.md "Secrets" (midnight/ and indexer/ files owned by uid 10001).
+dbsync_owner_secrets_dir = "/path/to/repo/secrets"          # postgres_db, postgres_user, postgres_password
+midnight_secrets_dir     = "/path/to/repo/secrets/midnight" # pgpass, postgres-ca.crt
+indexer_secrets_dir      = "/path/to/repo/secrets/indexer"  # secret, blockfrost_id

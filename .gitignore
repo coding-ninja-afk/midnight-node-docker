@@ -18,3 +18,8 @@ infra/**/.terraform/
 *.tfplan
 backend_override.tf
 crash.log
+
+# Host-specific Terraform variables (absolute paths on the Docker host)
+host.auto.tfvars
+# Plan/target guard records (host paths, daemon ID): deployment records, not source
+*-target.txt

@@ -1,0 +1,7 @@
+# Midnight phase 2 on infra/live/preprod-midnight, 2026-11-20 (UTC)
+gate: dbsync_ready_at=2026-11-20T13:45:51Z (evidence/dbsync-ready-2026-11-20-post-tls.txt)
+apply: 13:46:22-13:51:21, exit 0; index pre-creation 4m52s: 7 created + 4 already present (db-sync's), all 11 valid and matching
+node: uid 10001; SSL mode VerifyFull; 8 sessions as role midnight, all TLSv1.3; 0 CREATE INDEX attempts; 0 read-only DDL errors
+sync: see evidence/midnight-height-2026-11-20.txt (CATCHING UP, best 768 -> 14792 in 2 min, 9 peers); imports success=14802, verification_failed=0
+disk: marginal 32421 bytes/block, ~11.2 GB/h at ~7000 blocks/min; ~104 GiB more needed for 3.46M remaining blocks; 24 GB free
+action: midnight-node and indexer stopped 13:58:33 to protect the shared filesystem (Postgres, cardano-node); data kept (1.2 GB)

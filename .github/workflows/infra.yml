@@ -55,6 +55,11 @@ jobs:
         run: |
           terraform init -backend=false -lockfile=readonly
           terraform validate
+      - name: terraform validate (live root infra/live/preprod-midnight)
+        working-directory: infra/live/preprod-midnight
+        run: |
+          terraform init -backend=false -lockfile=readonly
+          terraform validate
       - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
         with:
           tflint_version: ${{ env.TFLINT_VERSION }}

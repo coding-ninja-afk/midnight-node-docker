@@ -1,0 +1,7 @@
+# midnight-height-check rpc=http://127.0.0.1:9944 samples=3 interval=60s min_advance=5
+# ts_utc best finalized highest gap peers is_syncing
+2026-11-20T13:52:37Z 768 641 3501571 3500803 1 true
+2026-11-20T13:53:37Z 6598 6478 3501581 3494983 4 true
+2026-11-20T13:54:37Z 14792 14587 3501591 3486799 9 true
+RESULT: CATCHING UP - 3486799 blocks behind highest 3501591, isSyncing=true, ETA ~497 min at 7002 blocks/min net
+exit=3

@@ -1,4 +1,6 @@
-# Empty until midnight-node runs. Then, e.g.:
+# midnight-node (infra/live/preprod-midnight) is deployed but STOPPED on purpose since 2026-11-20
+# 13:58 UTC: its chain data grows ~11 GB/h during initial sync (~104 GiB more needed, 24 GB free on
+# the filesystem that also holds Postgres and cardano-node). Re-add when it runs again:
 # - targets: ["midnight-node:9615"]
 #   labels: { component: midnight-node }
 []

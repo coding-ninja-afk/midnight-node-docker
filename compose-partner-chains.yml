@@ -65,14 +65,34 @@ services:
       - max_parallel_maintenance_workers=4
       - -c
       - max_wal_size=4GB
+      # TLS for midnight-node (node 2.1.101 connects over TLS only) and the same pg_hba as the
+      # Terraform module: role `midnight` must use TLS (hostssl), plain connections are rejected.
+      # Material in ./secrets/postgres-tls (git-ignored); server.key owned by uid 999, mode 0600.
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/secrets/tls/server.crt
+      - -c
+      - ssl_key_file=/run/secrets/tls/server.key
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
     shm_size: 1g
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./secrets/postgres-tls/server.crt:/run/secrets/tls/server.crt:ro
+      - ./secrets/postgres-tls/server.key:/run/secrets/tls/server.key:ro
+      - ./infra/modules/postgres/files/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./infra/modules/postgres/files/healthcheck.sh:/usr/local/bin/mn-pg-healthcheck.sh:ro
+    # Healthy = accepting connections AND the read-only role `midnight` exists with its password and
+    # grants (same check as the Terraform module; see infra/README.md).
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$(cat /run/secrets/postgres_user)\" -d \"$$(cat /run/secrets/postgres_db)\""]
+      test: ["CMD", "/bin/bash", "/usr/local/bin/mn-pg-healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
     stop_grace_period: 120s
     logging: *logging
 

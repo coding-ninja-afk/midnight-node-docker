@@ -1,0 +1,52 @@
+module.midnight_node.docker_container.this: Destroying... [id=4b5fc576c6c842cae9e9a0bcdebe3353d5e5da1dd8320f7528f30b2e7e387787]
+module.midnight_node.docker_container.this: Destruction complete after 0s
+module.midnight_db_indexes[0].docker_image.this: Creating...
+module.midnight_db_indexes[0].docker_image.this: Creation complete after 0s [id=sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536postgres:17.12-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536]
+module.midnight_db_indexes[0].docker_container.this: Creating...
+module.midnight_db_indexes[0].docker_container.this: Still creating... [00m10s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [00m20s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [00m30s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [00m40s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [00m50s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m00s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m10s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m20s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m30s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m40s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [01m50s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m00s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m10s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m20s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m30s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m40s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [02m50s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m00s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m10s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m20s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m30s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m40s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [03m50s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m00s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m10s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m20s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m30s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m40s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Still creating... [04m50s elapsed]
+module.midnight_db_indexes[0].docker_container.this: Creation complete after 4m52s [id=682498d97987784fce1dd55cd46f585fdba925cfcf8fd73155f1f818d7f7d264]
+module.midnight_node.docker_container.this: Creating...
+module.midnight_node.docker_container.this: Creation complete after 6s [id=88ef49ce1411fd8c81df59c7e32ec3f5507e7204cfc88a23fea081d3472c9d83]
+module.midnight_indexer.docker_container.this: Modifying... [id=4261fa08ea0fc575bd1661b1cb8ea5c815730b081301549f042304f4909cd0df]
+module.midnight_indexer.docker_container.this: Modifications complete after 1s [id=4261fa08ea0fc575bd1661b1cb8ea5c815730b081301549f042304f4909cd0df]
+
+Apply complete! Resources: 3 added, 1 changed, 1 destroyed.
+
+Outputs:
+
+dbsync_readiness_check = "scripts/dbsync-status.sh --stack compose --network preprod --advance 300"
+endpoints = {
+  "indexer_api" = "http://127.0.0.1:8088"
+  "midnight_p2p" = "0.0.0.0:30333"
+  "midnight_rpc" = "127.0.0.1:9944"
+}
+midnight_readiness_check = "MIDNIGHT_RPC_URL=http://127.0.0.1:9944 scripts/midnight-height-check.sh -n 3 -i 60"
+apply exit=0

@@ -154,6 +154,25 @@ until Postgres is up, then recovers through `restart = unless-stopped` (seen on 
 db-sync then replays only the recent part of the chain. `cardano-node.wait_timeout` is a variable
 because a restored node replays its ledger before the socket appears.
 
+## Live deployment on the synced host: `live/preprod-midnight`
+
+The full root above builds **every** component, a second Cardano stack included. On the host that
+already runs the synced compose stack, that would mean a 6+ hour resync, about 60 GB of extra disk
+(30 GB were free), and readiness evidence that would not apply to the new stack. So Midnight was
+deployed with a **second, Midnight-only root** that reuses the same modules, unchanged:
+
+| | Full root (`infra/`) | `live/preprod-midnight` |
+|---|---|---|
+| Cardano node, Postgres, db-sync | created (`mn-<env>-*`) | **not managed**: the synced compose stack |
+| Index pre-creation, midnight-node, indexer | modules, phase 2 | the **same modules**, phase 2 |
+| Network to Postgres | own `mn-<env>-internal` | the stack's `midnight-preprod_default` (Postgres is `postgres` there) |
+| Readiness gate | `--stack tf:mn-<env>` | `--stack compose`: the db-sync this node actually reads |
+| State | S3 (stub) | local, git-ignored, until the bucket exists; no secret values |
+| Host paths | `secrets_dir` var | `host.auto.tfvars` (git-ignored; `.example` committed) |
+
+The two-phase gate, the target guard (`scripts/assert-same-target.sh`) and every module test still
+apply. CI validates this root too. The procedure, step by step, is in RUNBOOK section 8.3.
+
 ## Secrets: what goes where, and what ends up in state
 
 No secret value appears in Terraform config, variables, plan or state. Containers get **host file

@@ -193,8 +193,11 @@ purpose: the point is to prove the pipeline is healthy, not just that the data i
 
 ## 8. Midnight node: prerequisites and verification
 
-> **Not yet deployed.** This section is written ahead of the deployment from the Midnight docs.
-> `scripts/midnight-height-check.sh` was tested against a mock RPC only (`scripts/tests/run-tests.sh`).
+> **Deployed 2026-11-20, then paused** (section 8.3). Phase 2 ran at 13:46 UTC. The node verified
+> blocks against the live db-sync (14,802 imports, 0 verification failures, `VerifyFull`, 9 peers):
+> `scripts/midnight-height-check.sh` reported CATCHING UP (`evidence/midnight-height-2026-11-20.txt`).
+> It was **stopped at 13:58** because its initial sync writes ~11 GB/h, needs ~104 GiB more, and only
+> 24 GB were free on the filesystem shared with Postgres and cardano-node. See the gotchas.
 
 ### 8.1 Prerequisites (from the docs, each one a gotcha)
 
@@ -287,6 +290,59 @@ with container logs and with other operators' reports without conversion mistake
 The first application-level health signal is that the node does **not** log
 `No latest block on chain.` (which means DB Sync was not caught up).
 
+### 8.3 Deployment on this host (Terraform root `infra/live/preprod-midnight`)
+
+Midnight runs **next to** the synced compose stack. It is managed by the Midnight-only Terraform
+root, which reuses `infra/modules/{network,midnight-db-indexes,midnight-node,midnight-indexer}`.
+The full `infra/` root would build a second, empty Cardano stack; this host lacks the disk for it,
+and its readiness evidence would not apply.
+
+1. **Postgres, once:** TLS on (CA and server cert with SAN `postgres` in git-ignored
+   `secrets/postgres-tls/`; key owned by uid 999, mode 0600), the module's `pg_hba.conf` (role
+   `midnight` TLS-only), and the role-aware healthcheck. All of this is in
+   `compose-partner-chains.yml`; applying it is one Postgres restart, and db-sync reconnects by
+   itself.
+2. **Read-only role, on the running DB,** with the same script the tests use:
+   ```bash
+   docker cp secrets/midnight_db_password midnight-preprod-postgres-1:/tmp/midnight_db_password
+   docker exec -i -e POSTGRES_USER=postgres -e POSTGRES_DB=cexplorer \
+     -e MIDNIGHT_DB_PASSWORD_FILE=/tmp/midnight_db_password \
+     midnight-preprod-postgres-1 bash < infra/modules/postgres/files/10-midnight-role.sh
+   docker exec midnight-preprod-postgres-1 rm -f /tmp/midnight_db_password
+   ```
+3. **Node and indexer secrets**, owned by uid 10001:
+   - `secrets/midnight/pgpass` (`postgres:5432:cexplorer:midnight:<pw>`)
+   - `secrets/midnight/postgres-ca.crt`
+   - `secrets/indexer/secret` (32 random bytes, hex)
+   - `secrets/indexer/blockfrost_id` (placeholder)
+
+   Then copy `host.auto.tfvars.example` to `host.auto.tfvars` with the absolute paths.
+4. **Phase 1** (nothing starts):
+   ```bash
+   cd infra/live/preprod-midnight && terraform init
+   terraform plan -out=phase1.tfplan
+   ../../scripts/assert-same-target.sh record phase1-target.txt phase1.tfplan
+   ../../scripts/assert-same-target.sh check phase1-target.txt phase1.tfplan
+   terraform apply phase1.tfplan
+   ```
+5. **Fresh readiness** against the db-sync this node reads (`terraform output -raw
+   dbsync_readiness_check`). Run it **at least 15 minutes after any Postgres or db-sync restart**,
+   and only continue on `RESULT: READY`.
+6. **Phase 2**, with that run's timestamp:
+   ```bash
+   terraform plan -var midnight_start=true -var dbsync_ready_at=<UTC> -out=phase2.tfplan
+   # record/check guard as above
+   terraform apply phase2.tfplan
+   ```
+   This builds the missing indexes (one-shot container), starts midnight-node (Terraform waits for
+   its RPC healthcheck), then starts the indexer.
+7. **Verify** with `terraform output -raw midnight_readiness_check` (section 8.2), and add
+   `midnight-node:9615` to `monitoring/prometheus/targets/midnight-node.yml`.
+8. **Check disk growth in the first minutes**, not only the size. Measured on 2026-11-20: 32 KB
+   per block marginal, ~11 GB/h at ~7,000 blocks/min, so an archive sync of 3.5 M blocks needs
+   **~110 GiB**. To pause safely: `docker stop -t 60 mn-preprod-midnight-indexer
+   mn-preprod-midnight-node` (data kept), and empty the monitoring target so the stop doesn't page.
+
 ## 9. Day-2 operations
 
 ```bash
@@ -372,5 +428,6 @@ git-ignored on purpose, so git will not save you here.
 | Assumed: Postgres reads `*_FILE` as uid 999 (an earlier version of this runbook said to `chown 999`) | **wrong**: the entrypoint reads them as root, so a fresh volume initialises with operator-owned 0600 files | no chown needed (smoke test O1, 2026-11-19). Files Postgres opens *itself* later (a TLS key, the Terraform stack's `midnight_db_password`) do need uid 999: see `infra/README.md` "Secrets" |
 | midnight-node 2.1.101 creates indexes in the db-sync DB at startup | a read-only role makes it exit and restart-loop | pre-create the 11 indexes as the table owner with `infra/modules/midnight-db-indexes/files/midnight-indexes.sh` (section 8.1) |
 | midnight-node ignores `sslmode=verify-full` in its connection string | encrypted, but certificate and host name not verified | set `SSL_ROOT_CERT` (section 8.1) |
+| Midnight initial sync is ~110 GiB (archive, 3.5 M blocks) at ~11 GB/h | fills a small disk within hours, on the same filesystem as Postgres | measure growth right after start; size the disk first (or pruning, if the indexer is served elsewhere); stop the node to pause |
 | A first Postgres init that aborts still leaves PGDATA initialised | after a restart Postgres runs without the `midnight` role, and `pg_isready` says healthy | role-aware healthcheck (section 8.1); fix the secret, remove the fresh volume, re-apply |
 | After a host reboot Docker starts all containers at once (Compose `depends_on` is not applied) | db-sync exits with "Connection refused" until Postgres is up, and recovers on its own (seen 2026-11-19 13:49 UTC: 2 restarts) | expected. `dbsync-status.sh` check 5 then reports FAULT for up to 15 min: rerun after that window before investigating |
