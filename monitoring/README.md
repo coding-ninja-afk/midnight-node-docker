@@ -314,7 +314,10 @@ it runs unmonitored and nothing says so. When resuming (RUNBOOK section 8.3, ste
   heights and import results, disk with its 24 h prediction, scrape health.
 - **A firing and pending alerts table.**
 
-Midnight panels show NO DATA until a Midnight target is added.
+Midnight panels show NO DATA until a Midnight target is added. On the Midnight tiles, NO DATA is
+**grey** rather than red or blue. A text panel under the tiles says the node is intentionally paused,
+and that NO DATA still means the series is missing: it is never a healthy value. Remove that panel
+when Midnight resumes (RUNBOOK 8.3, step 8).
 
 Read alerts from this dashboard's alert panels or from Alertmanager (http://127.0.0.1:9093).
 **Not** from Grafana's built-in "Firing alerts" widget: it only lists Grafana-managed rules, so it

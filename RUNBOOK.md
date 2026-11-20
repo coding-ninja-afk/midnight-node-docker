@@ -345,8 +345,9 @@ and its readiness evidence would not apply.
    **To resume** (it is paused like this since 13:58 UTC on 2026-11-20): first make room for the
    rest of the sync (~104 GiB more at the time it stopped), then
    `docker start mn-preprod-midnight-node mn-preprod-midnight-indexer`. Re-add the monitoring target
-   (step 7), confirm `midnight-node` is UP at http://127.0.0.1:9090/targets, and rerun the readiness
-   check. Nothing alerts if the target is forgotten (monitoring/README.md, "Known limitations").
+   (step 7), confirm `midnight-node` is UP at http://127.0.0.1:9090/targets, remove the "Midnight is
+   intentionally paused" note panel from `monitoring/grafana/dashboards/midnight-fno.json`, and
+   rerun the readiness check. Nothing alerts if the target is forgotten (monitoring/README.md, "Known limitations").
 
 ## 9. Day-2 operations
 

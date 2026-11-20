@@ -213,7 +213,7 @@
       "id": 5,
       "type": "stat",
       "title": "Midnight best block",
-      "description": "Best block of midnight-node. NO DATA until a Midnight target is configured.",
+      "description": "Best block of midnight-node. NO DATA until a Midnight target is configured. NO DATA (grey) means the series is missing: no Midnight target, or the node is down. It is never a healthy value.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -242,8 +242,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "#808080",
                 "value": null
+              },
+              {
+                "color": "blue",
+                "value": 0
               }
             ]
           },
@@ -269,7 +273,7 @@
       "id": 6,
       "type": "stat",
       "title": "Midnight blocks / 5 min",
-      "description": "Blocks imported in 5 min (expected ~50). Pages (MidnightBlocksStalled) below 25.",
+      "description": "Blocks imported in 5 min (expected ~50). Pages (MidnightBlocksStalled) below 25. NO DATA (grey) means the series is missing: no Midnight target, or the node is down. It is never a healthy value.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -298,8 +302,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#808080",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": -1000000000
               },
               {
                 "color": "green",
@@ -512,13 +520,29 @@
       }
     },
     {
+      "id": 22,
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Midnight is intentionally paused** (stopped 2026-11-20 13:58 UTC, not enough disk for its initial sync; see the repo README, Section 1). Its Prometheus target is empty, so its tiles and graphs show grey **NO DATA**, and no Midnight alert can fire. **NO DATA still means missing data**: it is never a healthy value. When Midnight runs again, re-add its target (RUNBOOK 8.3, step 7) and remove this note; NO DATA after that is a fault."
+      }
+    },
+    {
       "id": 10,
       "type": "row",
       "title": "Cardano (feeds Midnight)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 7,
         "w": 24,
         "h": 1
       },
@@ -535,7 +559,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 8,
         "w": 12,
         "h": 8
       },
@@ -605,7 +629,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 6,
+        "y": 8,
         "w": 12,
         "h": 8
       },
@@ -659,7 +683,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -713,7 +737,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 14,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -772,7 +796,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 24,
         "w": 24,
         "h": 1
       },
@@ -789,7 +813,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 25,
         "w": 12,
         "h": 8
       },
@@ -852,7 +876,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 23,
+        "y": 25,
         "w": 12,
         "h": 8
       },
@@ -902,7 +926,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 33,
         "w": 24,
         "h": 1
       },
@@ -919,7 +943,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 34,
         "w": 12,
         "h": 8
       },
@@ -989,7 +1013,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 34,
         "w": 12,
         "h": 8
       },
@@ -1033,7 +1057,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 42,
         "w": 24,
         "h": 7
       },
